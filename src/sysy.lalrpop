@@ -222,27 +222,50 @@ _FuncRParams: Vec<Exp> = {
   CommaNotEmpty<_Exp> => <>
 };
 
+_MulOp: BinaryOp = {
+  "*" => BinaryOp::Mul,
+  "/" => BinaryOp::Div,
+  "%" => BinaryOp::Mod,
+};
+
+_AddOp: BinaryOp = {
+  "+" => BinaryOp::Add,
+  "-" => BinaryOp::Sub,
+};
+
+_RelOp: BinaryOp = {
+  "<"  => BinaryOp::Lt,
+  ">"  => BinaryOp::Gt,
+  "<=" => BinaryOp::Le,
+  ">=" => BinaryOp::Ge,
+};
+
+_EqOp: BinaryOp = {
+  "==" => BinaryOp::Eq,
+  "!=" => BinaryOp::Ne,
+};
+
 _MulExp: Exp = {
-  <mul_exp: _MulExp> <op: r"[*/%]"> <unary_exp: _UnaryExp> 
-                => Exp::Binary(Box::new(mul_exp), BinaryOp::from_str(op).unwrap(), Box::new(unary_exp)),
+  <mul_exp: _MulExp> <op: _MulOp> <unary_exp: _UnaryExp> 
+                => Exp::Binary(Box::new(mul_exp), op, Box::new(unary_exp)),
   <_UnaryExp>   => <>,
 };
 
 _AddExp: Exp = {
-  <add_exp: _AddExp> <op: r"[+-]"> <mul_exp: _MulExp> 
-                => Exp::Binary(Box::new(add_exp), BinaryOp::from_str(op).unwrap(), Box::new(mul_exp)),
+  <add_exp: _AddExp> <op: _AddOp> <mul_exp: _MulExp> 
+                => Exp::Binary(Box::new(add_exp), op, Box::new(mul_exp)),
   <_MulExp>     => <>,
 };
 
 _RelExp: Exp = {
-  <rel_exp: _RelExp> <op: r"(<=|>=|<|>)"> <add_exp: _AddExp> 
-                => Exp::Binary(Box::new(rel_exp), BinaryOp::from_str(op).unwrap(), Box::new(add_exp)),
+  <rel_exp: _RelExp> <op: _RelOp> <add_exp: _AddExp> 
+                => Exp::Binary(Box::new(rel_exp), op, Box::new(add_exp)),
   <_AddExp>     => <>,
 };
 
 _EqExp: Exp = {
-  <eq_exp: _EqExp> <op: r"(==|!=)"> <rel_exp: _RelExp> 
-                => Exp::Binary(Box::new(eq_exp), BinaryOp::from_str(op).unwrap(), Box::new(rel_exp)),
+  <eq_exp: _EqExp> <op: _EqOp> <rel_exp: _RelExp> 
+                => Exp::Binary(Box::new(eq_exp), op, Box::new(rel_exp)),
   <_RelExp>     => <>,
 };
 

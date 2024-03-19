@@ -38,7 +38,7 @@ fn main() -> Result<()> {
   let input = read_to_string(input)?;
 
   let ast: ast::prog::CompUnit = sysy::_CompUnitParser::new().parse(&input).unwrap();
-  println!("{:#?}", ast);
+  println!("{:?}", ast);
   if args.koopa.is_some() {
     assert!(args.riscv.is_none());
 
