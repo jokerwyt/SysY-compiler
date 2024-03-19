@@ -1,4 +1,4 @@
-/* misc elements of AST */
+//! misc elements of AST
 
 use super::expr::*;
 

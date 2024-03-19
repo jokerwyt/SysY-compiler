@@ -1,6 +1,4 @@
-/*
-Program-realted elements of AST.
-*/
+//! Program-realted elements of AST.
 
 use super::basic::*;
 use super::expr::*;

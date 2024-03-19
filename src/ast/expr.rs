@@ -1,8 +1,6 @@
-/*
-Expression-related elements of AST.
-We usually do not translate EBNF directly when processing expressions since such
-tree structure can contains information such as priority.
-*/
+//! Expression-related elements of AST.
+//! We usually do not translate EBNF directly when processing expressions since such
+//! tree structure can contains information such as priority.
 
 use super::basic::*;
 

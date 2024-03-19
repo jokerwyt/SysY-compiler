@@ -9,59 +9,58 @@ match {
   _
 }
 
-// The EBNF we followed:
-// 
-// CompUnit      ::= [CompUnit] (Decl | FuncDef);
-
-// Decl          ::= ConstDecl | VarDecl;
-// ConstDecl     ::= "const" BType ConstDef {"," ConstDef} ";";
-// BType         ::= "int";
-// ConstIdxList  ::= {"[" ConstExp "]"};
-// ConstDef      ::= IDENT ConstIdxList "=" ConstInitVal;
-// ConstInitVal  ::= ConstExp | "{" [ConstInitVal {"," ConstInitVal}] "}";
-// VarDecl       ::= BType VarDef {"," VarDef} ";";
-// VarDef        ::= IDENT ConstIdxList
-//         | IDENT ConstIdxList "=" InitVal;
-// InitVal       ::= Exp | "{" [InitVal {"," InitVal}] "}";
-
-// FuncDef       ::= FuncType IDENT "(" [FuncFParams] ")" Block;
-// FuncType      ::= "void" | "int";
-// FuncFParams   ::= FuncFParam {"," FuncFParam};
-// FuncFParam    ::= BType IDENT ["[" "]" ConstIdxList];
-
-// Block         ::= "{" {BlockItem} "}";
-// BlockItem     ::= Decl | Stmt;
-
-// We have to pay some effort to solve if-if-else conflict
-// 
-// Stmt          ::= StmtExceptIf
-//         | StmtIfElse
-//         | "if" "(" Exp ")" Stmt ";"
-// StmtIfElse    ::= 
-//           "if" "(" Exp ")" StmtExceptIf "else" Stmt ";";
-//         | "if" "(" Exp ")" StmtIfElse "else" Stmt ";";
-// StmtExceptIf  ::= LVal "=" Exp ";"
-//         | [Exp] ";"
-//         | Block
-//         | "while" "(" Exp ")" Stmt
-//         | "break" ";"
-//         | "continue" ";"
-//         | "return" [Exp] ";";
-
-// Exp           ::= LOrExp;
-// LVal          ::= IDENT {"[" Exp "]"};
-// PrimaryExp    ::= "(" Exp ")" | LVal | Number;
-// Number        ::= INT_CONST;
-// UnaryExp      ::= PrimaryExp | IDENT "(" [FuncRParams] ")" | UnaryOp UnaryExp;
-// UnaryOp       ::= "+" | "-" | "!";
-// FuncRParams   ::= Exp {"," Exp};
-// MulExp        ::= UnaryExp | MulExp ("*" | "/" | "%") UnaryExp;
-// AddExp        ::= MulExp | AddExp ("+" | "-") MulExp;
-// RelExp        ::= AddExp | RelExp ("<" | ">" | "<=" | ">=") AddExp;
-// EqExp         ::= RelExp | EqExp ("==" | "!=") RelExp;
-// LAndExp       ::= EqExp | LAndExp "&&" EqExp;
-// LOrExp        ::= LAndExp | LOrExp "||" LAndExp;
-// ConstExp      ::= Exp;
+//! The EBNF we followed:
+//! 
+//! CompUnit      ::= [CompUnit] (Decl | FuncDef);
+//! Decl          ::= ConstDecl | VarDecl;
+//! ConstDecl     ::= "const" BType ConstDef {"," ConstDef} ";";
+//! BType         ::= "int";
+//! ConstIdxList  ::= {"[" ConstExp "]"};
+//! ConstDef      ::= IDENT ConstIdxList "=" ConstInitVal;
+//! ConstInitVal  ::= ConstExp | "{" [ConstInitVal {"," ConstInitVal}] "}";
+//! VarDecl       ::= BType VarDef {"," VarDef} ";";
+//! VarDef        ::= IDENT ConstIdxList
+//!         | IDENT ConstIdxList "=" InitVal;
+//! InitVal       ::= Exp | "{" [InitVal {"," InitVal}] "}";
+//!
+//! FuncDef       ::= FuncType IDENT "(" [FuncFParams] ")" Block;
+//! FuncType      ::= "void" | "int";
+//! FuncFParams   ::= FuncFParam {"," FuncFParam};
+//! FuncFParam    ::= BType IDENT ["[" "]" ConstIdxList];
+//!
+//! Block         ::= "{" {BlockItem} "}";
+//! BlockItem     ::= Decl | Stmt;
+//!
+//! We have to pay some effort to solve if-if-else conflict:
+//! 
+//! Stmt          ::= StmtExceptIf
+//!         | StmtIfElse
+//!         | "if" "(" Exp ")" Stmt ";"
+//! StmtIfElse    ::= 
+//!           "if" "(" Exp ")" StmtExceptIf "else" Stmt ";";
+//!         | "if" "(" Exp ")" StmtIfElse "else" Stmt ";";
+//! StmtExceptIf  ::= LVal "=" Exp ";"
+//!         | [Exp] ";"
+//!         | Block
+//!         | "while" "(" Exp ")" Stmt
+//!         | "break" ";"
+//!         | "continue" ";"
+//!         | "return" [Exp] ";";
+//!
+//! Exp           ::= LOrExp;
+//! LVal          ::= IDENT {"[" Exp "]"};
+//! PrimaryExp    ::= "(" Exp ")" | LVal | Number;
+//! Number        ::= INT_CONST;
+//! UnaryExp      ::= PrimaryExp | IDENT "(" [FuncRParams] ")" | UnaryOp UnaryExp;
+//! UnaryOp       ::= "+" | "-" | "!";
+//! FuncRParams   ::= Exp {"," Exp};
+//! MulExp        ::= UnaryExp | MulExp ("*" | "/" | "%") UnaryExp;
+//! AddExp        ::= MulExp | AddExp ("+" | "-") MulExp;
+//! RelExp        ::= AddExp | RelExp ("<" | ">" | "<=" | ">=") AddExp;
+//! EqExp         ::= RelExp | EqExp ("==" | "!=") RelExp;
+//! LAndExp       ::= EqExp | LAndExp "&&" EqExp;
+//! LOrExp        ::= LAndExp | LOrExp "||" LAndExp;
+//! ConstExp      ::= Exp;
 
 Comma<T>: Vec<T> = { 
     <mut v:(<T> ",")*> <e:T?> => match e {
@@ -80,30 +79,28 @@ CommaNotEmpty<T>: Vec<T> = {
     }
 };
 
-
-
 pub _CompUnit: CompUnit = {
-  <lists: _CompUnitItem+> => lists
+  <_CompUnitItem+> => <>
 };
 
 _CompUnitItem: CompUnitItem = {
-  <func_def: _FuncDef> => CompUnitItem::FuncDef(<>),
-  <decl: _Decl> => CompUnitItem::Decl(<>),
+  <_FuncDef>  => CompUnitItem::FuncDef(<>),
+  <_Decl>     => CompUnitItem::Decl(<>),
 };
 
 _Decl: Decl = {
-  <const_decl: _ConstDecl> => Decl::Const(<>),
-  <var_decl: _VarDecl> => Decl::Var(<>),
+  <_ConstDecl>  => Decl::Const(<>),
+  <_VarDecl>    => Decl::Var(<>),
 };
 
 _ConstDecl: ConstDecl = {
-  "const" <btype: _BType> <const_defs: CommaNotEmpty<_ConstDef>> ";" => {
-    ConstDecl { btype, const_defs }
-  }
+  "const" <btype: _BType> <const_defs: CommaNotEmpty<_ConstDef>> ";" 
+    => ConstDecl { <> }
 };
 
 _ConstIdxList: Vec<Exp> = {
-  <const_exps: ("[" <_ConstExp> "]")*> => const_exps
+  <("[" <_ConstExp> "]")*> 
+    => <>
 };
 
 _BType: BType = 
@@ -111,105 +108,101 @@ _BType: BType =
 
 _ConstDef: ConstDef = {
   <ident: _Ident> <idx: _ConstIdxList> "=" <const_init_val: _ConstInitVal> => {
-    ConstDef { ident, idx, const_init_val }
+    ConstDef { <> }
   }
 };
 
 _ConstInitVal: ConstInitVal = {
-  <const_exp: _ConstExp> => ConstInitVal::Single(const_exp),
-  "{" <const_init_vals: Comma<_ConstInitVal>> "}" => ConstInitVal::Sequence(const_init_vals),
+  <_ConstExp>                     => ConstInitVal::Single(<>),
+  "{" <Comma<_ConstInitVal>> "}"  => ConstInitVal::Sequence(<>),
 };
 
 _VarDecl: VarDecl = {
-  <btype: _BType> <var_defs: CommaNotEmpty<_VarDef>> ";" => {
-    VarDecl { btype, var_defs }
-  }
+  <btype: _BType> <var_defs: CommaNotEmpty<_VarDef>> ";" 
+    => VarDecl { <> }
 };
 
 _VarDef: VarDef = {
-  <ident: _Ident> <idx: _ConstIdxList> <init_val: ("=" <_InitVal>)?> => {
-    VarDef { ident, idx, init_val }
-  }
+  <ident: _Ident> <idx: _ConstIdxList> <init_val: ("=" <_InitVal>)?> 
+    => VarDef { <> }
 };
 
 _InitVal: InitVal = {
-  <exp: _Exp> => InitVal::Single(exp),
-  "{" <init_vals: Comma<_InitVal>> "}" => InitVal::Sequence(init_vals),
+  <_Exp>                    => InitVal::Single(<>),
+  "{" <Comma<_InitVal>> "}" => InitVal::Sequence(<>),
 };
 
 
 _FuncDef: FuncDef = {
-  <func_type: _BType> <ident: _Ident> "(" <func_f_params: _FuncFParams> ")" <block: _Block> => {
-    FuncDef { func_type, ident, func_f_params, block }
-  }
+  <func_type: _BType> <ident: _Ident> "(" <func_f_params: _FuncFParams> ")" <block: _Block> 
+    => FuncDef { <> }
 };
 
 _FuncFParams: Vec<FuncFParam> = {
-  <func_f_params: Comma<_FuncFParam>> => func_f_params
+  <Comma<_FuncFParam>> => <>
 };
 
 _FuncFParam: FuncFParam = {
-  <btype: _BType> <ident: _Ident> <shape: ("[" "]" <_ConstIdxList>)?> => {
-    FuncFParam { btype, ident, shape_except_first_dimension: shape }
-  }
+  <btype: _BType> <ident: _Ident> <shape_except_first_dimension: ("[" "]" <_ConstIdxList>)?> 
+    => FuncFParam { <> }
 };
 
 _Block: Block = {
-  "{" <block_items: _BlockItem*> "}" => block_items
+  "{" <_BlockItem*> "}" => <>
 };
 
 _BlockItem: BlockItem = {
-  <decl: _Decl> => BlockItem::Decl(<>),
-  <stmt: _Stmt> => BlockItem::Stmt(<>),
+  <_Decl> => BlockItem::Decl(<>),
+  <_Stmt> => BlockItem::Stmt(<>),
 };
 
 _Stmt: Stmt = {
-  <_StmtExceptIf> => <>,
-  <_StmtIfElse> => <>,
+  <_StmtExceptIf>   => <>,
+  <_StmtIfElse>     => <>,
   "if" "(" <exp: _Exp> ")" <stmt: _Stmt>  ";" 
-    => Stmt::IfElse(exp, Box::new(stmt), None)
+                    => Stmt::IfElse(exp, Box::new(stmt), None)
 };
 
 _StmtIfElse: Stmt = {
   "if" "(" <exp: _Exp> ")" <stmt1: _StmtExceptIf> "else" <stmt2: _Stmt> ";"
-    => Stmt::IfElse(exp, Box::new(stmt1), Some(Box::new(stmt2))),
+      => Stmt::IfElse(exp, Box::new(stmt1), Some(Box::new(stmt2))),
   "if" "(" <exp: _Exp> ")" <stmt1: _StmtIfElse> "else" <stmt2: _Stmt> ";"
-    => Stmt::IfElse(exp, Box::new(stmt1), Some(Box::new(stmt2))),
+      => Stmt::IfElse(exp, Box::new(stmt1), Some(Box::new(stmt2))),
 };
 
 _StmtExceptIf: Stmt = {
-  <lval: _LVal> "=" <exp: _Exp> ";" => Stmt::Assign(lval, exp),
-  <exp: _Exp?> ";" => Stmt::Exp(exp),
-  <block: _Block> => Stmt::Block(block),
-  "while" "(" <exp: _Exp> ")" <stmt: _Stmt> => Stmt::While(exp, Box::new(stmt)),
-  "break" ";" => Stmt::Break,
-  "continue" ";" => Stmt::Continue,
-  "return" <exp: _Exp?> ";" => Stmt::Return(exp),
+  <_LVal> "=" <_Exp> ";"      => Stmt::Assign(<>),
+  <_Exp?> ";"                 => Stmt::Exp(<>),
+  <_Block>                    => Stmt::Block(<>),
+  "while" "(" <exp: _Exp> ")" <stmt: _Stmt> 
+                              => Stmt::While(exp, Box::new(stmt)),
+  "break" ";"                 => Stmt::Break,
+  "continue" ";"              => Stmt::Continue,
+  "return" <_Exp?> ";"        => Stmt::Return(<>),
 };
 
 _Exp: Exp = 
-  <lor_exp: _LOrExp> => lor_exp;
+  <_LOrExp> => <>;
 
 _LVal: LVal = {
-  <name: _Ident> <idx: ("[" <_Exp> "]")*> => LVal { name, idx }
+  <name: _Ident> <idx: ("[" <_Exp> "]")*> => LVal { <> }
 };
 
 _PrimaryExp: Exp = {
-  "(" <exp: _Exp> ")" => exp,
-  <lval: _LVal> => Exp::LVal(lval),
-  <number: _Number> => Exp::Number(number),
+  "(" <_Exp> ")"  => <>,
+  <_LVal>         => Exp::LVal(<>),
+  <_Number>       => Exp::Number(<>),
 };
 
 _Number: Number = {
-  <num: _IntConst> => num
+  <_IntConst> => <>
 };
 
 _UnaryExp: Exp = {
-  <primary_exp: _PrimaryExp> => primary_exp,
-  <ident: _Ident> "(" <func_r_params: _FuncRParams> ")" => {
-    Exp::Call(ident, func_r_params)
-  },
-  <unary_op: _UnaryOp> <unary_exp: _UnaryExp> => Exp::Unary(unary_op, Box::new(unary_exp)),
+  <_PrimaryExp>                   => <>,
+  <_Ident> "(" <_FuncRParams> ")" => Exp::Call(<>),
+  <unary_op: _UnaryOp> <unary_exp: _UnaryExp> 
+                                  => Exp::Unary(unary_op, Box::new(unary_exp)),
 };
 
 _UnaryOp: UnaryOp = {
@@ -223,50 +216,49 @@ _FuncRParams: Vec<Exp> = {
 };
 
 _MulExp: Exp = {
-  <unary_exp: _UnaryExp> => unary_exp,
   <mul_exp: _MulExp> <op: r"[*/%]"> <unary_exp: _UnaryExp> 
-    => Exp::Binary(Box::new(mul_exp), BinaryOp::from_str(op).unwrap(), Box::new(unary_exp)),
+                => Exp::Binary(Box::new(mul_exp), BinaryOp::from_str(op).unwrap(), Box::new(unary_exp)),
+  <_UnaryExp>   => <>,
 };
 
 _AddExp: Exp = {
-  <mul_exp: _MulExp> => mul_exp,
   <add_exp: _AddExp> <op: r"[+-]"> <mul_exp: _MulExp> 
-    => Exp::Binary(Box::new(add_exp), BinaryOp::from_str(op).unwrap(), Box::new(mul_exp)),
+                => Exp::Binary(Box::new(add_exp), BinaryOp::from_str(op).unwrap(), Box::new(mul_exp)),
+  <_MulExp>     => <>,
 };
 
 _RelExp: Exp = {
-  <add_exp: _AddExp> => add_exp,
   <rel_exp: _RelExp> <op: r"(<=|>=|<|>)"> <add_exp: _AddExp> 
-    => Exp::Binary(Box::new(rel_exp), BinaryOp::from_str(op).unwrap(), Box::new(add_exp)),
+                => Exp::Binary(Box::new(rel_exp), BinaryOp::from_str(op).unwrap(), Box::new(add_exp)),
+  <_AddExp>     => <>,
 };
 
 _EqExp: Exp = {
-  <rel_exp: _RelExp> => rel_exp,
   <eq_exp: _EqExp> <op: r"(==|!=)"> <rel_exp: _RelExp> 
-    => Exp::Binary(Box::new(eq_exp), BinaryOp::from_str(op).unwrap(), Box::new(rel_exp)),
+                => Exp::Binary(Box::new(eq_exp), BinaryOp::from_str(op).unwrap(), Box::new(rel_exp)),
+  <_RelExp>     => <>,
 };
 
 _LAndExp: Exp = {
-  <eq_exp: _EqExp> => eq_exp,
   <land_exp: _LAndExp> "&&" <eq_exp: _EqExp> 
-    => Exp::Binary(Box::new(land_exp), BinaryOp::And, Box::new(eq_exp)),
+                => Exp::Binary(Box::new(land_exp), BinaryOp::And, Box::new(eq_exp)),
+  <_EqExp>      => <>,
 };
 
 _LOrExp: Exp = {
-  <land_exp: _LAndExp> => land_exp,
   <lor_exp: _LOrExp> "||" <land_exp: _LAndExp> 
-    => Exp::Binary(Box::new(lor_exp), BinaryOp::Or, Box::new(land_exp)),
+                => Exp::Binary(Box::new(lor_exp), BinaryOp::Or, Box::new(land_exp)),
+  <_LAndExp>    => <>,
 };
 
 _Ident: String = 
   r"[_a-zA-Z][_a-zA-Z0-9]*" => <>.to_string();
 
 _IntConst: i32 = {
-  r"[1-9][0-9]*" => i32::from_str_radix(<>, 10).unwrap(),
-  r"0[0-7]*" => i32::from_str_radix(<>, 8).unwrap(),
-  r"0[xX][0-9a-fA-F]+" => i32::from_str_radix(&<>[2..], 16).unwrap(),
+  r"[1-9][0-9]*"        => i32::from_str_radix(<>, 10).unwrap(),
+  r"0[0-7]*"            => i32::from_str_radix(<>, 8).unwrap(),
+  r"0[xX][0-9a-fA-F]+"  => i32::from_str_radix(&<>[2..], 16).unwrap(),
 };
 
-_ConstExp: Exp = {
-  <exp: _Exp> => exp
-};
+_ConstExp: Exp = 
+  <_Exp> => <>;
