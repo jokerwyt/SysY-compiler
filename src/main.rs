@@ -8,7 +8,7 @@ use std::io::Result;
 
 use ::koopa::ir::*;
 use ::koopa::back::*;
-use:: koopa::ir::builder::BasicBlockBuilder;
+use ::koopa::ir::builder::BasicBlockBuilder;
 use ::koopa::ir::builder::LocalInstBuilder;
 
 // 引用 lalrpop 生成的解析器
@@ -25,13 +25,10 @@ fn main() -> Result<()> {
   args.next();
   let output = args.next().unwrap();
 
-  // 读取输入文件
   let input = read_to_string(input)?;
 
-  // 调用 lalrpop 生成的 parser 解析输入文件
-  let ast: ast::CompUnit = sysy::CompUnitParser::new().parse(&input).unwrap();
+  let ast: ast::prog::CompUnit = sysy::_CompUnitParser::new().parse(&input).unwrap();
 
-  // 输出解析得到的 AST
   println!("{:#?}", ast);
 
   let mut prog = Program::new();
@@ -41,13 +38,13 @@ fn main() -> Result<()> {
     Type::get_i32(),
   ));
 
-  let main_data = prog.func_mut(main);
-  let bb = main_data.dfg_mut().new_bb().basic_block(Some("%entry".into()));
-  main_data.layout_mut().bbs_mut().extend(vec![bb]);
+  // let main_data = prog.func_mut(main);
+  // let bb = main_data.dfg_mut().new_bb().basic_block(Some("%entry".into()));
+  // main_data.layout_mut().bbs_mut().extend(vec![bb]);
 
-  let ret_val = main_data.dfg_mut().new_value().integer(ast.func_def.block.stmt.num);
-  let ret = main_data.dfg_mut().new_value().ret(Some(ret_val));
-  main_data.layout_mut().bb_mut(bb).insts_mut().extend([ret]);
+  // let ret_val = main_data.dfg_mut().new_value().integer(ast.func_def.block.stmt.num);
+  // let ret_statement = main_data.dfg_mut().new_value().ret(Some(ret_val));
+  // main_data.layout_mut().bb_mut(bb).insts_mut().extend([ret_statement]);
 
   // open the output file
   let output_file = std::fs::File::create(output)?;
