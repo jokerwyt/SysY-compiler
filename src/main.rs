@@ -38,33 +38,31 @@ fn main() -> Result<()> {
   let input = read_to_string(input)?;
 
   let ast: ast::prog::CompUnit = sysy::_CompUnitParser::new().parse(&input).unwrap();
-
+  println!("{:#?}", ast);
   if args.koopa.is_some() {
     assert!(args.riscv.is_none());
 
     // compile my ast 
   } else {
-    println!("{:#?}", ast);
+    // let mut prog = Program::new();
+    // let main = prog.new_func(FunctionData::with_param_names(
+    //   "@main".into(),
+    //   vec![],
+    //   Type::get_i32(),
+    // ));
     
-    let mut prog = Program::new();
-    let main = prog.new_func(FunctionData::with_param_names(
-      "@main".into(),
-      vec![],
-      Type::get_i32(),
-    ));
+    // // let main_data = prog.func_mut(main);
+    // // let bb = main_data.dfg_mut().new_bb().basic_block(Some("%entry".into()));
+    // // main_data.layout_mut().bbs_mut().extend(vec![bb]);
     
-    // let main_data = prog.func_mut(main);
-    // let bb = main_data.dfg_mut().new_bb().basic_block(Some("%entry".into()));
-    // main_data.layout_mut().bbs_mut().extend(vec![bb]);
+    // // let ret_val = main_data.dfg_mut().new_value().integer(ast.func_def.block.stmt.num);
+    // // let ret_statement = main_data.dfg_mut().new_value().ret(Some(ret_val));
+    // // main_data.layout_mut().bb_mut(bb).insts_mut().extend([ret_statement]);
     
-    // let ret_val = main_data.dfg_mut().new_value().integer(ast.func_def.block.stmt.num);
-    // let ret_statement = main_data.dfg_mut().new_value().ret(Some(ret_val));
-    // main_data.layout_mut().bb_mut(bb).insts_mut().extend([ret_statement]);
-    
-    // open the output file
-    let output_file = std::fs::File::create(output)?;
-    let mut generator = KoopaGenerator::new(output_file);
-    generator.generate_on(&prog)?;
+    // // open the output file
+    // let output_file = std::fs::File::create(output)?;
+    // let mut generator = KoopaGenerator::new(output_file);
+    // generator.generate_on(&prog)?;
     
   }
   Ok(())

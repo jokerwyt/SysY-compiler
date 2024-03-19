@@ -31,18 +31,19 @@ match {
 //! Block         ::= "{" {BlockItem} "}";
 //! BlockItem     ::= Decl | Stmt;
 //!
-//! We have to pay some effort to solve if-if-else conflict:
+//! We have to pay some effort to solve dangling-else conflict:
+//! see https://en.wikipedia.org/wiki/Dangling_else#Avoiding_the_conflict_in_LR_parsers
 //! 
-//! Stmt          ::= StmtExceptIf
-//!         | StmtIfElse
-//!         | "if" "(" Exp ")" Stmt ";"
-//! StmtIfElse    ::= 
-//!           "if" "(" Exp ")" StmtExceptIf "else" Stmt ";";
-//!         | "if" "(" Exp ")" StmtIfElse "else" Stmt ";";
-//! StmtExceptIf  ::= LVal "=" Exp ";"
+//! Stmt          ::= StmtIfClose | StmtIfOpen;
+//! StmtIfClose   ::= StmtNotEndInStmt 
+//!         | "if" "(" Exp ")" StmtIfClose "else" StmtIfClose
+//!         | "while" "(" Exp ")" StmtIfClose;
+//! StmtIfOpen    ::= "if" "(" Exp ")" Stmt 
+//!         | "if" "(" Exp ")" StmtIfClose "else" StmtIfOpen
+//!         | "while" "(" Exp ")" StmtIfOpen;
+//! StmtNotEndInStmt  ::= LVal "=" Exp ";"
 //!         | [Exp] ";"
 //!         | Block
-//!         | "while" "(" Exp ")" Stmt
 //!         | "break" ";"
 //!         | "continue" ";"
 //!         | "return" [Exp] ";";
@@ -157,25 +158,31 @@ _BlockItem: BlockItem = {
 };
 
 _Stmt: Stmt = {
-  <_StmtExceptIf>   => <>,
-  <_StmtIfElse>     => <>,
-  "if" "(" <exp: _Exp> ")" <stmt: _Stmt>  ";" 
-                    => Stmt::IfElse(exp, Box::new(stmt), None)
+  <_StmtIfClose>     => <>,
+  <_StmtIfOpen>   => <>,
 };
 
-_StmtIfElse: Stmt = {
-  "if" "(" <exp: _Exp> ")" <stmt1: _StmtExceptIf> "else" <stmt2: _Stmt> ";"
+_StmtIfOpen: Stmt = {
+  "if" "(" <exp: _Exp> ")" <stmt: _Stmt> 
+                    => Stmt::IfElse(exp, Box::new(stmt), None),
+  "if" "(" <exp: _Exp> ")" <stmt1: _StmtIfClose> "else" <stmt2: _StmtIfOpen> 
       => Stmt::IfElse(exp, Box::new(stmt1), Some(Box::new(stmt2))),
-  "if" "(" <exp: _Exp> ")" <stmt1: _StmtIfElse> "else" <stmt2: _Stmt> ";"
-      => Stmt::IfElse(exp, Box::new(stmt1), Some(Box::new(stmt2))),
+  "while" "(" <exp: _Exp> ")" <stmt: _StmtIfOpen> 
+                              => Stmt::While(exp, Box::new(stmt)),
 };
 
-_StmtExceptIf: Stmt = {
+_StmtIfClose: Stmt = {
+  <_StmtNotEndInStmt>   => <>,
+  "if" "(" <exp: _Exp> ")" <stmt1: _StmtIfClose> "else" <stmt2: _StmtIfClose> 
+      => Stmt::IfElse(exp, Box::new(stmt1), Some(Box::new(stmt2))),
+  "while" "(" <exp: _Exp> ")" <stmt: _StmtIfClose>
+                              => Stmt::While(exp, Box::new(stmt)),
+};
+
+_StmtNotEndInStmt: Stmt = {
   <_LVal> "=" <_Exp> ";"      => Stmt::Assign(<>),
   <_Exp?> ";"                 => Stmt::Exp(<>),
   <_Block>                    => Stmt::Block(<>),
-  "while" "(" <exp: _Exp> ")" <stmt: _Stmt> 
-                              => Stmt::While(exp, Box::new(stmt)),
   "break" ";"                 => Stmt::Break,
   "continue" ";"              => Stmt::Continue,
   "return" <_Exp?> ";"        => Stmt::Return(<>),
