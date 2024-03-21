@@ -3,7 +3,7 @@ pub mod semantics;
 pub mod utils;
 mod pg;
 
-use ast::AstData;
+use ast::{AstData, AstNodeId};
 use clap::Parser;
 use lalrpop_util::lalrpop_mod;
 use std::fs::read_to_string;
@@ -36,9 +36,7 @@ fn main() -> Result<()> {
 
   let input = read_to_string(input)?;
 
-  let ast: ast::CompUnit = sysy::_CompUnitParser::new().parse(&input).unwrap();
-  let ast_root = Arc::new(AstNode::build(AstData::CompUnit(ast)));
-
+  let ast: AstNodeId = sysy::_CompUnitParser::new().parse(&input).unwrap();
 
   // ast.semantics_analyze();
 
