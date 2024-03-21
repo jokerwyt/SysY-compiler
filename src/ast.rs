@@ -1,5 +1,44 @@
 use uuid::Uuid;
 
+pub type AstCompUnit = Box<AstNode>;
+pub type AstCompUnitItem = Box<AstNode>;
+pub type AstFuncDef = Box<AstNode>;
+pub type AstDecl = Box<AstNode>;
+pub type AstConstDecl = Box<AstNode>;
+pub type AstVarDecl = Box<AstNode>;
+pub type AstConstDef = Box<AstNode>;
+pub type AstVarDef = Box<AstNode>;
+pub type AstFuncFParam = Box<AstNode>;
+pub type AstBlock = Box<AstNode>;
+pub type AstBlockItem = Box<AstNode>;
+pub type AstStmt = Box<AstNode>;
+pub type AstExp = Box<AstNode>;
+pub type AstInitVal = Box<AstNode>;
+pub type AstLVal = Box<AstNode>;
+pub type AstConstInitVal = Box<AstNode>;
+
+/// transfer a AstNode into a specific variant
+macro_rules! ast_into {
+    ($node:expr, $variant:ident) => {
+        if let AstData::$variant(data) = &$node.ast {
+            Some(data)
+        } else {
+            panic!("ast_into! failed: expected {:?}, got {:?}", stringify!($variant), $node.ast)
+        }
+    };
+}
+
+/// return true if the AstNode is a specific variant
+macro_rules! ast_is {
+    ($node:expr, $variant:ident) => {
+        if let AstData::$variant(_) = &$node.ast {
+            true
+        } else {
+            false
+        }
+    };
+}
+
 pub struct AstNode {
   pub id: Uuid, 
   pub ast: AstData,
@@ -7,62 +46,78 @@ pub struct AstNode {
 }
 
 impl AstNode {
-  // pub fn build(ast: AstData) -> Self {
-  //   AstNode {
-  //     ast,
-  //     parent: None,
-  //   }
-  // }
+  pub fn new_comp_unit(comp_unit: Vec<AstNode>) -> AstNode {
+    AstNode {
+      id: Uuid::new_v4(),
+      ast: AstData::CompUnit(comp_unit),
+      parent: None,
+    }
+  }
+  pub fn new_decl_const_decl(const_decl: AstNode) -> AstNode {
+    AstNode {
+      id: Uuid::new_v4(),
+      ast: AstData::Decl(Decl::Const(const_decl)),
+      parent: None,
+    }
+  }
+
+  pub fn new_comp_unit_item_func_def(func_def: AstNode) -> AstNode {
+    AstNode {
+      id: Uuid::new_v4(),
+      ast: AstData::FuncDef(func_def),
+      parent: None,
+    }
+  }
 }
 
 pub enum AstData {
   CompUnit(CompUnit),
   FuncDef(FuncDef),
-  Decl(Decl),
   ConstDecl(ConstDecl),
   VarDecl(VarDecl),
-  ConstDef(ConstDef),
-  VarDef(VarDef),
-  FuncFParam(FuncFParam),
+  ConstDef(ConstDef), 
+  VarDef(VarDef), 
+  FuncFParams(FuncFParams),
   Block(Block),
   BlockItem(BlockItem),
   Stmt(Stmt),
-  ExpEval(ExpEval),
+  Exp(Exp),
   InitVal(InitVal),
+  ConstInitVal(ConstInitVal),
 }
 
 pub type Ident = String;
 
-pub type CompUnit = Vec<CompUnitItem>;
+pub type CompUnit = Vec<AstCompUnitItem>;
 
 pub enum CompUnitItem {
-  FuncDef(FuncDef),
-  Decl(Decl),
+  FuncDef(AstFuncDef),
+  Decl(AstDecl),
 }
 
 pub enum Decl {
-  Const(ConstDecl),
-  Var(VarDecl),
-}
+  Const(AstConstDecl),
+  Var(AstVarDecl),
+} 
 
 pub struct ConstDecl {
-  pub const_defs: Vec<ConstDef>,
+  pub const_defs: Vec<AstConstDef>,
 }
 
 pub struct ConstDef {
   pub ident: Ident,
-  pub idx: Vec<ExpEval>, // alternative array index
-  pub const_init_val: InitVal
+  pub idx: Vec<AstExp>, // alternative array index
+  pub const_init_val: AstInitVal
 }
 
 pub struct VarDecl {
-  pub var_defs: Vec<VarDef>,
+  pub var_defs: Vec<AstVarDef>,
 }
 
 pub struct VarDef {
   pub ident: Ident,
-  pub idx: Vec<ExpEval>, // alternative array index
-  pub init_val: Option<InitVal>
+  pub idx: Vec<AstExp>, // alternative array index
+  pub init_val: Option<AstInitVal>
 }
 
 pub struct FuncDef {
@@ -70,44 +125,40 @@ pub struct FuncDef {
   pub has_retval: bool, 
 
   pub ident: String,
-  pub func_f_params: FuncFParams,
-  pub block: Block,
+  pub func_f_params: Vec<AstFuncFParam>,
+  pub block: AstBlock,
 }
-
-pub type FuncFParams = Vec<FuncFParam>;
 
 pub struct Block {
-  pub items: Vec<BlockItem>,
+  pub items: Vec<AstBlockItem>,
 }
 
-impl Block {
-  pub fn new(items: Vec<BlockItem>) -> Self {
-    Block {
-      items, 
-    }
-  }
-}
 
 pub enum BlockItem {
-  Decl(Decl),
-  Stmt(Stmt),
+  Decl(AstDecl),
+  Stmt(AstStmt),
 }
 
 pub enum Stmt {
-  Assign(LVal, ExpEval),
-  Exp (Option<ExpEval>),
-  Block(Block),
-  IfElse(ExpEval, Box<Stmt>, Option<Box<Stmt>>),
-  While(ExpEval, Box<Stmt>),
+  Assign(AstLVal, AstExp),
+  Exp (Option<AstExp>),
+  Block(AstBlock),
+  IfElse(AstExp, AstStmt, Option<AstStmt>),
+  While(AstExp, AstStmt),
   Break,
   Continue,
-  Return(Option<ExpEval>),
+  Return(Option<AstExp>),
   Empty, // ;
 }
 
+pub enum ConstInitVal {
+  Single(AstExp),
+  Sequence(Vec<AstInitVal>)
+}
+
 pub enum InitVal {
-  Single(ExpEval),
-  Sequence(Vec<InitVal>)
+  Single(AstExp),
+  Sequence(Vec<AstInitVal>)
 }
 
 pub enum FuncType {
@@ -119,76 +170,27 @@ pub struct FuncFParam {
   pub ident: Ident,
 
   /// A formal parameter array will omit the first dim
-  pub shape_exclude_first_dimension: Option<Vec<ExpEval>>,
+  pub shape_exclude_first_dimension: Option<Vec<AstExp>>,
 }
 
 pub struct LVal {
   pub name: Ident, 
-  pub idx: Vec<ExpEval>,
+  pub idx: Vec<AstExp>,
 }
 
 pub type Number = i32;
 
-pub struct ExpEval {
-  pub exp: ExpInside,
+pub struct Exp {
+  pub exp_data: ExpData,
   pub const_value: Option<i32>
 }
 
-impl ExpEval {
-  pub fn new_lval(lval: LVal) -> Self {
-    ExpEval {
-      exp: ExpInside::LVal(lval),
-      const_value: None
-    }
-  }
-
-  pub fn new_number(n: Number) -> Self {
-    ExpEval {
-      exp: ExpInside::Number(n),
-      const_value: Some(n)
-    }
-  }
-
-  pub fn new_binary(exp1: ExpEval, op: BinaryOp, exp2: ExpEval) -> Self {
-    let const_value = match (exp1.const_value, exp2.const_value) {
-      (Some(v1), Some(v2)) => {
-        Some(BinaryOp::eval(v1, op, v2))
-      },
-      _ => None,
-    };
-    ExpEval {
-      exp: ExpInside::Binary(Box::new(exp1), op, Box::new(exp2)),
-      const_value,
-    }
-  }
-
-  pub fn new_unary(op: UnaryOp, exp: ExpEval) -> Self {
-    let const_value = match exp.const_value {
-      Some(v) => {
-        Some(UnaryOp::eval(op, v))
-      },
-      None => None,
-    };
-    ExpEval {
-      exp: ExpInside::Unary(op, Box::new(exp)),
-      const_value,
-    }
-  }
-
-  pub fn new_call(ident: Ident, exps: Vec<ExpEval>) -> Self {
-    ExpEval {
-      exp: ExpInside::Call(ident, exps),
-      const_value: None,
-    }
-  }
-}
-
-pub enum ExpInside {
-  LVal(LVal), 
-  Number(Number),
-  Binary(Box<ExpEval>, BinaryOp, Box<ExpEval>),
-  Unary(UnaryOp, Box<ExpEval>),
-  Call(Ident, Vec<ExpEval>),
+pub enum ExpData {
+  LVal(AstLVal), 
+  Number(i32),
+  Binary(AstExp, BinaryOp, AstExp),
+  Unary(UnaryOp, AstExp),
+  Call(Ident, Vec<AstExp>),
 }
 
 #[derive(Clone, Copy)]

@@ -82,139 +82,139 @@ CommaNotEmpty<T>: Vec<T> = {
     }
 };
 
-pub _CompUnit: CompUnit = {
-  <_CompUnitItem+> => <>
+pub _CompUnit: AstNode = {
+  <_CompUnitItem+> => AstNode::new_comp_unit(<>)
 };
 
-_CompUnitItem: CompUnitItem = {
-  <_FuncDef>  => CompUnitItem::FuncDef(<>),
-  <_Decl>     => CompUnitItem::Decl(<>)
+_CompUnitItem: AstNode = {
+  <_FuncDef>  => AstNode::new_comp_unit_item_func_def(<>)
+  <_Decl>     => AstNode::new_comp_unit_item_decl(<>)
 };
 
-_Decl: Decl = {
-  <_ConstDecl>  => Decl::Const(<>),
-  <_VarDecl>    => Decl::Var(<>)
+_Decl: AstNode = {
+  <_ConstDecl>  => AstNode::new_decl_const_decl(<>)
+  <_VarDecl>    => AstNode::new_decl_var_decl(<>)
 };
 
-_ConstDecl: ConstDecl = {
-  "const" <btype: _BType> <const_defs: CommaNotEmpty<_ConstDef>> ";" 
-    => ConstDecl { const_defs }
+_ConstDecl: AstNode = {
+  "const" <_BType> <CommaNotEmpty<_ConstDef>> ";" 
+    => AstNode::new_const_decl(<>)
 };
 
-_ConstIdxList: Vec<ExpEval> = {
+_ConstIdxList: AstNode = {
   <("[" <_ConstExp> "]")*> 
-    => <>
+    => AstNode::new_const_idx_list(<>)
 };
 
-_BType: i32 = {
-  "int" => 0
-};
+_BType: AstNode = {
+  "int" => AstNode::new_btype()
+}
 
-_ConstDef: ConstDef = {
+_ConstDef: AstNode = {
   <ident: _Ident> <idx: _ConstIdxList> "=" <const_init_val: _ConstInitVal> => {
-    ConstDef { <> }
+    AstNode::new_const_def(<>)
   }
 };
 
-_ConstInitVal: InitVal = {
-  <_ConstExp>                     => InitVal::Single(<>),
-  "{" <Comma<_ConstInitVal>> "}"  => InitVal::Sequence(<>)
+_ConstInitVal: AstNode = {
+  <_ConstExp>                     => AstNode::new_const_init_val_single(<>)
+  "{" <Comma<_ConstInitVal>> "}"  => AstNode::new_const_init_val_sequence(<>)
 };
 
-_VarDecl: VarDecl = {
-  <x: _BType> <var_defs: CommaNotEmpty<_VarDef>> ";" 
-    => VarDecl { var_defs }
+_VarDecl: AstNode = {
+  <_BType> <var_defs: CommaNotEmpty<_VarDef>> ";" 
+    => AstNode::new_var_decl(var_defs)
 };
 
-_VarDef: VarDef = {
-  <ident: _Ident> <idx: _ConstIdxList> <init_val: ("=" <_InitVal>)?> 
-    => VarDef { <> }
+_VarDef: AstNode = {
+  <_Ident> <_ConstIdxList> <("=" <_InitVal>)?> 
+    => AstNode::new_var_def(<>)
 };
 
-_InitVal: InitVal = {
-  <_Exp>                    => InitVal::Single(<>),
-  "{" <Comma<_InitVal>> "}" => InitVal::Sequence(<>)
+_InitVal: AstNode = {
+  <_Exp>                    => AstNode::new_init_val_single(<>),
+  "{" <Comma<_InitVal>> "}" => AstNode::new_init_val_sequence(<>)
 };
 
 
-_FuncDef: FuncDef = {
+_FuncDef: AstNode = {
   "void" <ident: _Ident> "(" <func_f_params: _FuncFParams> ")" <block: _Block> 
-    => FuncDef { has_retval: false, ident, func_f_params, block },
-  <t: _BType> <ident: _Ident> "(" <func_f_params: _FuncFParams> ")" <block: _Block>
-    => FuncDef { has_retval: true, ident, func_f_params, block }
+    => AstNode::new_func_def(false, ident, func_f_params, block),
+  <_BType> <ident: _Ident> "(" <func_f_params: _FuncFParams> ")" <block: _Block>
+    => AstNode::new_func_def(true, ident, func_f_params, block)
 };
 
-_FuncFParams: Vec<FuncFParam> = {
-  <Comma<_FuncFParam>> => <>
+_FuncFParams: AstNode = {
+  <Comma<_FuncFParam>> => AstNode::new_func_f_params(<>)
 };
 
-_FuncFParam: FuncFParam = {
-  <btype: _BType> <ident: _Ident> <shape_exclude_first_dimension: ("[" "]" <_ConstIdxList>)?> 
-    => FuncFParam { ident, shape_exclude_first_dimension }
+_FuncFParam: AstNode = {
+  <_BType> <_Ident> <("[" "]" <_ConstIdxList>)?> 
+    => AstNode::new_func_f_param(<>)
 };
 
-_Block: Block = {
-  "{" <_BlockItem*> "}" => Block::new(<>)
+_Block: AstNode = {
+  "{" <_BlockItem*> "}" => AstNode::new_block(<>)
 };
 
-_BlockItem: BlockItem = {
-  <_Decl> => BlockItem::Decl(<>),
-  <_Stmt> => BlockItem::Stmt(<>)
+_BlockItem: AstNode = {
+  <_Decl> => AstNode::new_block_item_decl(<>)
+  <_Stmt> => AstNode::new_block_item_stmt(<>)
 };
 
-_Stmt: Stmt = {
+_Stmt: AstNode = {
   <_StmtIfClose>      => <>,
   <_StmtIfOpen>       => <>
 };
 
-_StmtIfOpen: Stmt = {
+_StmtIfOpen: AstNode = {
   "if" "(" <exp: _Exp> ")" <stmt: _Stmt> 
-            => Stmt::IfElse(exp, Box::new(stmt), None),
+            => AstNode::new_stmt_if_else(exp, stmt, None),
   "if" "(" <exp: _Exp> ")" <stmt1: _StmtIfClose> "else" <stmt2: _StmtIfOpen> 
-            => Stmt::IfElse(exp, Box::new(stmt1), Some(Box::new(stmt2))),
+            => AstNode::new_stmt_if_else(exp, stmt1, Some(stmt2)),
   "while" "(" <exp: _Exp> ")" <stmt: _StmtIfOpen> 
-            => Stmt::While(exp, Box::new(stmt))
+            => AstNode::new_stmt_while(exp, stmt)
 };
 
-_StmtIfClose: Stmt = {
+_StmtIfClose: AstNode = {
   <_StmtNotEndInStmt>   => <>, 
   "if" "(" <exp: _Exp> ")" <stmt1: _StmtIfClose> "else" <stmt2: _StmtIfClose> 
-          => Stmt::IfElse(exp, Box::new(stmt1), Some(Box::new(stmt2))),
+          => AstNode::new_stmt_if_else(exp, stmt1, Some(stmt2)),
   "while" "(" <exp: _Exp> ")" <stmt: _StmtIfClose>
-          => Stmt::While(exp, Box::new(stmt))
+          => Ast::new_stmt_while(exp, stmt)
 };
 
-_StmtNotEndInStmt: Stmt = {
-  <_LVal> "=" <_Exp> ";"      => Stmt::Assign(<>),
-  <_Exp?> ";"                 => Stmt::Exp(<>),
-  <_Block>                    => Stmt::Block(<>),
-  "break" ";"                 => Stmt::Break,
-  "continue" ";"              => Stmt::Continue,
-  "return" <_Exp?> ";"        => Stmt::Return(<>)
+_StmtNotEndInStmt: AstNode = {
+  <_LVal> "=" <_Exp> ";"      => AstNode::new_stmt_assign(<>),
+  <_Exp?> ";"                 => AstNode::new_stmt_exp(<>),
+  <_Block>                    => AstNode::new_stmt_block(<>),
+  "break" ";"                 => AstNode::new_stmt_break(),
+  "continue" ";"              => AstNode::new_stmt_continue(),
+  "return" <_Exp?> ";"        => AstNode::new_stmt_return(<>)
 };
 
-_Exp: ExpEval = 
+_Exp: AstNode = 
   <_LOrExp> => <>;
 
-_LVal: LVal = {
-  <name: _Ident> <idx: ("[" <_Exp> "]")*> => LVal { <> }
+_LVal: AstNode = {
+  <name: _Ident> <idx: ("[" <_Exp> "]")*> => AstNode::new_lval(<>)
 };
 
-_PrimaryExp: ExpEval = {
+_PrimaryExp: AstNode = {
   "(" <_Exp> ")"  => <>,
-  <_LVal>         => ExpEval::new_lval(<>),
-  <_Number>       => ExpEval::new_number(<>)
+  <_LVal>         => <>,
+  <_Number>       => AstNode::new_number(<>)
 };
 
-_Number: Number = {
+_Number: AstNode = {
   <_IntConst> => <>
 };
 
-_UnaryExp: ExpEval = {
+_UnaryExp: AstNode = {
   <_PrimaryExp>                   => <>,
-  <_Ident> "(" <_FuncRParams> ")" => ExpEval::new_call(<>),
-  <unary_op: _UnaryOp> <unary_exp: _UnaryExp> 
-                                  => ExpEval::new_unary(unary_op, unary_exp)
+  <_Ident> "(" <_FuncRParams> ")" => AstNode::new_exp_call(<>),
+  <_UnaryOp> <_UnaryExp> 
+                                  => AstNode::new_exp_unary(<>)
 };
 
 _UnaryOp: UnaryOp = {
@@ -223,8 +223,8 @@ _UnaryOp: UnaryOp = {
   "!" => UnaryOp::Not
 };
 
-_FuncRParams: Vec<ExpEval> = {
-  CommaNotEmpty<_Exp> => <>
+_FuncRParams: AstNode = {
+  CommaNotEmpty<_Exp> => AstNode::new_func_r_params(<>)
 };
 
 _MulOp: BinaryOp = {
@@ -250,39 +250,39 @@ _EqOp: BinaryOp = {
   "!=" => BinaryOp::Ne
 };
 
-_MulExp: ExpEval = {
-  <mul_exp: _MulExp> <op: _MulOp> <unary_exp: _UnaryExp> 
-                => ExpEval::new_binary(mul_exp, op, unary_exp),
+_MulExp: AstNode = {
+  <_MulExp> <_MulOp> <_UnaryExp> 
+                => AstNode::new_exp_binary(<>),
   <_UnaryExp>   => <>
 };
 
-_AddExp: ExpEval = {
-  <add_exp: _AddExp> <op: _AddOp> <mul_exp: _MulExp> 
-                => ExpEval::new_binary(add_exp, op, mul_exp),
+_AddExp: AstNode = {
+  <_AddExp> <_AddOp> <_MulExp> 
+                => AstNode::new_exp_binary(<>),
   <_MulExp>     => <>
 };
 
-_RelExp: ExpEval = {
-  <rel_exp: _RelExp> <op: _RelOp> <add_exp: _AddExp> 
-                => ExpEval::new_binary(rel_exp, op, add_exp),
+_RelExp: AstNode = {
+  <_RelExp> <_RelOp> <_AddExp> 
+                => AstNode::new_exp_binary(<>),
   <_AddExp>     => <>
 };
 
-_EqExp: ExpEval = {
-  <eq_exp: _EqExp> <op: _EqOp> <rel_exp: _RelExp> 
-                => ExpEval::new_binary(eq_exp, op, rel_exp),
+_EqExp: AstNode = {
+  <_EqExp> <_EqOp> <_RelExp> 
+                => AstNode::new_exp_binary(<>),
   <_RelExp>     => <>
 };
 
-_LAndExp: ExpEval = {
+_LAndExp: AstNode = {
   <land_exp: _LAndExp> "&&" <eq_exp: _EqExp> 
-                => ExpEval::new_binary(land_exp, BinaryOp::And, eq_exp),
+                => AstNode::new_exp_binary(land_exp, BinaryOp::And, eq_exp),
   <_EqExp>      => <>
 };
 
-_LOrExp: ExpEval = {
+_LOrExp: AstNode = {
   <lor_exp: _LOrExp> "||" <land_exp: _LAndExp> 
-                => ExpEval::new_binary(lor_exp, BinaryOp::Or, land_exp),
+                => AstNode::new_exp_binary(lor_exp, BinaryOp::Or, land_exp),
   <_LAndExp>    => <>
 };
 
@@ -295,5 +295,5 @@ _IntConst: i32 = {
   r"0[xX][0-9a-fA-F]+"  => i32::from_str_radix(&<>[2..], 16).unwrap()
 };
 
-_ConstExp: ExpEval = 
+_ConstExp: AstNode = 
   <_Exp> => <>;
