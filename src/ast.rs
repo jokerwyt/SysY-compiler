@@ -1,8 +1,18 @@
-use crate::utils::RcRef;
+use uuid::Uuid;
 
 pub struct AstNode {
+  pub id: Uuid, 
   pub ast: AstData,
-  pub parent: Option<&'static AstNode>,
+  pub parent: Option<Uuid>,
+}
+
+impl AstNode {
+  // pub fn build(ast: AstData) -> Self {
+  //   AstNode {
+  //     ast,
+  //     parent: None,
+  //   }
+  // }
 }
 
 pub enum AstData {

@@ -3,12 +3,14 @@ pub mod semantics;
 pub mod utils;
 mod pg;
 
+use ast::AstData;
 use clap::Parser;
 use lalrpop_util::lalrpop_mod;
 use std::fs::read_to_string;
 use std::io::Result;
+use std::sync::Arc;
 
-use crate::utils::RcRef;
+use crate::ast::AstNode;
 
 lalrpop_mod!(sysy);
 
@@ -31,11 +33,12 @@ fn main() -> Result<()> {
 
   let input = args.input;
   let output = args.output;
-  
 
   let input = read_to_string(input)?;
 
-  let ast: RcRef<ast::CompUnit> = sysy::_CompUnitParser::new().parse(&input).unwrap();
+  let ast: ast::CompUnit = sysy::_CompUnitParser::new().parse(&input).unwrap();
+  let ast_root = Arc::new(AstNode::build(AstData::CompUnit(ast)));
+
 
   // ast.semantics_analyze();
 
@@ -44,7 +47,7 @@ fn main() -> Result<()> {
 
     // compile my ast 
   } else {
-    // let mut prog = Program::new();
+    let mut prog = koopa::ir::Program::new();
     // let main = prog.new_func(FunctionData::with_param_names(
     //   "@main".into(),
     //   vec![],
