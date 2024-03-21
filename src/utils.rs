@@ -6,6 +6,12 @@ pub struct RcRef<T> {
   data: Rc<RefCell<T>>,
 }
 
+impl<T> Clone for RcRef<T> {
+    fn clone(&self) -> Self {
+        Self { data: self.data.clone() }
+    }
+}
+
 impl <T> RcRef<T> {
   pub fn new(data: T) -> Self {
     Self {

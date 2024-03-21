@@ -82,26 +82,26 @@ CommaNotEmpty<T>: Vec<T> = {
     }
 };
 
-pub _CompUnit: RcRef<CompUnit> = {
-  <_CompUnitItem+> => RcRef::new(<>)
+pub _CompUnit: CompUnit = {
+  <_CompUnitItem+> => <>
 };
 
-_CompUnitItem: RcRef<CompUnitItem> = {
-  <_FuncDef>  => RcRef::new(CompUnitItem::FuncDef(<>)),
-  <_Decl>     => RcRef::new(CompUnitItem::Decl(<>))
+_CompUnitItem: CompUnitItem = {
+  <_FuncDef>  => CompUnitItem::FuncDef(<>),
+  <_Decl>     => CompUnitItem::Decl(<>)
 };
 
-_Decl: RcRef<Decl> = {
-  <_ConstDecl>  => RcRef::new(Decl::Const(<>)),
-  <_VarDecl>    => RcRef::new(Decl::Var(<>))
+_Decl: Decl = {
+  <_ConstDecl>  => Decl::Const(<>),
+  <_VarDecl>    => Decl::Var(<>)
 };
 
-_ConstDecl: RcRef<ConstDecl> = {
+_ConstDecl: ConstDecl = {
   "const" <btype: _BType> <const_defs: CommaNotEmpty<_ConstDef>> ";" 
-    => RcRef::new(ConstDecl { const_defs })
+    => ConstDecl { const_defs }
 };
 
-_ConstIdxList: Vec<RcRef<ExpEval>> = {
+_ConstIdxList: Vec<ExpEval> = {
   <("[" <_ConstExp> "]")*> 
     => <>
 };
@@ -110,111 +110,111 @@ _BType: i32 = {
   "int" => 0
 };
 
-_ConstDef: RcRef<ConstDef> = {
+_ConstDef: ConstDef = {
   <ident: _Ident> <idx: _ConstIdxList> "=" <const_init_val: _ConstInitVal> => {
-    RcRef::new(ConstDef { <> })
+    ConstDef { <> }
   }
 };
 
-_ConstInitVal: RcRef<InitVal> = {
-  <_ConstExp>                     => RcRef::new(InitVal::Single(<>)),
-  "{" <Comma<_ConstInitVal>> "}"  => RcRef::new(InitVal::Sequence(<>))
+_ConstInitVal: InitVal = {
+  <_ConstExp>                     => InitVal::Single(<>),
+  "{" <Comma<_ConstInitVal>> "}"  => InitVal::Sequence(<>)
 };
 
-_VarDecl: RcRef<VarDecl> = {
+_VarDecl: VarDecl = {
   <x: _BType> <var_defs: CommaNotEmpty<_VarDef>> ";" 
-    => RcRef::new(VarDecl { var_defs })
+    => VarDecl { var_defs }
 };
 
-_VarDef: RcRef<VarDef> = {
+_VarDef: VarDef = {
   <ident: _Ident> <idx: _ConstIdxList> <init_val: ("=" <_InitVal>)?> 
-    => RcRef::new(VarDef { <> })
+    => VarDef { <> }
 };
 
-_InitVal: RcRef<InitVal> = {
-  <_Exp>                    => RcRef::new(InitVal::Single(<>)),
-  "{" <Comma<_InitVal>> "}" => RcRef::new(InitVal::Sequence(<>))
+_InitVal: InitVal = {
+  <_Exp>                    => InitVal::Single(<>),
+  "{" <Comma<_InitVal>> "}" => InitVal::Sequence(<>)
 };
 
 
-_FuncDef: RcRef<FuncDef> = {
+_FuncDef: FuncDef = {
   "void" <ident: _Ident> "(" <func_f_params: _FuncFParams> ")" <block: _Block> 
-    => RcRef::new(FuncDef { has_retval: false, ident, func_f_params, block }),
+    => FuncDef { has_retval: false, ident, func_f_params, block },
   <t: _BType> <ident: _Ident> "(" <func_f_params: _FuncFParams> ")" <block: _Block>
-    => RcRef::new(FuncDef { has_retval: true, ident, func_f_params, block })
+    => FuncDef { has_retval: true, ident, func_f_params, block }
 };
 
-_FuncFParams: Vec<RcRef<FuncFParam>> = {
+_FuncFParams: Vec<FuncFParam> = {
   <Comma<_FuncFParam>> => <>
 };
 
-_FuncFParam: RcRef<FuncFParam> = {
-  <btype: _BType> <ident: _Ident> <shape_except_first_dimension: ("[" "]" <_ConstIdxList>)?> 
-    => RcRef::new(FuncFParam { ident, shape_except_first_dimension })
+_FuncFParam: FuncFParam = {
+  <btype: _BType> <ident: _Ident> <shape_exclude_first_dimension: ("[" "]" <_ConstIdxList>)?> 
+    => FuncFParam { ident, shape_exclude_first_dimension }
 };
 
-_Block: RcRef<Block> = {
-  "{" <_BlockItem*> "}" => RcRef::new(Block::new(<>))
+_Block: Block = {
+  "{" <_BlockItem*> "}" => Block::new(<>)
 };
 
-_BlockItem: RcRef<BlockItem> = {
-  <_Decl> => RcRef::new(BlockItem::Decl(<>)),
-  <_Stmt> => RcRef::new(BlockItem::Stmt(<>))
+_BlockItem: BlockItem = {
+  <_Decl> => BlockItem::Decl(<>),
+  <_Stmt> => BlockItem::Stmt(<>)
 };
 
-_Stmt: RcRef<Stmt> = {
+_Stmt: Stmt = {
   <_StmtIfClose>      => <>,
   <_StmtIfOpen>       => <>
 };
 
-_StmtIfOpen: RcRef<Stmt> = {
+_StmtIfOpen: Stmt = {
   "if" "(" <exp: _Exp> ")" <stmt: _Stmt> 
-                    => RcRef::new(Stmt::IfElse(exp, stmt, None)),
+            => Stmt::IfElse(exp, Box::new(stmt), None),
   "if" "(" <exp: _Exp> ")" <stmt1: _StmtIfClose> "else" <stmt2: _StmtIfOpen> 
-      => RcRef::new(Stmt::IfElse(exp, stmt1, Some(stmt2))),
+            => Stmt::IfElse(exp, Box::new(stmt1), Some(Box::new(stmt2))),
   "while" "(" <exp: _Exp> ")" <stmt: _StmtIfOpen> 
-                              => RcRef::new(Stmt::While(exp, stmt))
+            => Stmt::While(exp, Box::new(stmt))
 };
 
-_StmtIfClose: RcRef<Stmt> = {
+_StmtIfClose: Stmt = {
   <_StmtNotEndInStmt>   => <>, 
   "if" "(" <exp: _Exp> ")" <stmt1: _StmtIfClose> "else" <stmt2: _StmtIfClose> 
-      => RcRef::new(Stmt::IfElse(exp, stmt1, Some(stmt2))),
+          => Stmt::IfElse(exp, Box::new(stmt1), Some(Box::new(stmt2))),
   "while" "(" <exp: _Exp> ")" <stmt: _StmtIfClose>
-                              => RcRef::new(Stmt::While(exp, stmt))
+          => Stmt::While(exp, Box::new(stmt))
 };
 
-_StmtNotEndInStmt: RcRef<Stmt> = {
-  <_LVal> "=" <_Exp> ";"      => RcRef::new(Stmt::Assign(<>)),
-  <_Exp?> ";"                 => RcRef::new(Stmt::Exp(<>)),
-  <_Block>                    => RcRef::new(Stmt::Block(<>)),
-  "break" ";"                 => RcRef::new(Stmt::Break),
-  "continue" ";"              => RcRef::new(Stmt::Continue),
-  "return" <_Exp?> ";"        => RcRef::new(Stmt::Return(<>))
+_StmtNotEndInStmt: Stmt = {
+  <_LVal> "=" <_Exp> ";"      => Stmt::Assign(<>),
+  <_Exp?> ";"                 => Stmt::Exp(<>),
+  <_Block>                    => Stmt::Block(<>),
+  "break" ";"                 => Stmt::Break,
+  "continue" ";"              => Stmt::Continue,
+  "return" <_Exp?> ";"        => Stmt::Return(<>)
 };
 
-_Exp: RcRef<ExpEval> = 
+_Exp: ExpEval = 
   <_LOrExp> => <>;
 
-_LVal: RcRef<LVal> = {
-  <name: _Ident> <idx: ("[" <_Exp> "]")*> => RcRef::new(LVal { <> })
+_LVal: LVal = {
+  <name: _Ident> <idx: ("[" <_Exp> "]")*> => LVal { <> }
 };
 
-_PrimaryExp: RcRef<ExpEval> = {
+_PrimaryExp: ExpEval = {
   "(" <_Exp> ")"  => <>,
-  <_LVal>         => RcRef::new(ExpEval::new_lval(<>)),
-  <_Number>       => RcRef::new(ExpEval::new_number(<>))
+  <_LVal>         => ExpEval::new_lval(<>),
+  <_Number>       => ExpEval::new_number(<>)
 };
 
 _Number: Number = {
   <_IntConst> => <>
 };
 
-_UnaryExp: RcRef<ExpEval> = {
+_UnaryExp: ExpEval = {
   <_PrimaryExp>                   => <>,
-  <_Ident> "(" <_FuncRParams> ")" => RcRef::new(ExpEval::new_call(<>)),
+  <_Ident> "(" <_FuncRParams> ")" => ExpEval::new_call(<>),
   <unary_op: _UnaryOp> <unary_exp: _UnaryExp> 
-                                  => RcRef::new(ExpEval::new_unary(unary_op, unary_exp))
+                                  => ExpEval::new_unary(unary_op, unary_exp)
 };
 
 _UnaryOp: UnaryOp = {
@@ -223,7 +223,7 @@ _UnaryOp: UnaryOp = {
   "!" => UnaryOp::Not
 };
 
-_FuncRParams: Vec<RcRef<ExpEval>> = {
+_FuncRParams: Vec<ExpEval> = {
   CommaNotEmpty<_Exp> => <>
 };
 
@@ -250,39 +250,39 @@ _EqOp: BinaryOp = {
   "!=" => BinaryOp::Ne
 };
 
-_MulExp: RcRef<ExpEval> = {
+_MulExp: ExpEval = {
   <mul_exp: _MulExp> <op: _MulOp> <unary_exp: _UnaryExp> 
-                => RcRef::new(ExpEval::new_binary(mul_exp, op, unary_exp)),
+                => ExpEval::new_binary(mul_exp, op, unary_exp),
   <_UnaryExp>   => <>
 };
 
-_AddExp: RcRef<ExpEval> = {
+_AddExp: ExpEval = {
   <add_exp: _AddExp> <op: _AddOp> <mul_exp: _MulExp> 
-                => RcRef::new(ExpEval::new_binary(add_exp, op, mul_exp)),
+                => ExpEval::new_binary(add_exp, op, mul_exp),
   <_MulExp>     => <>
 };
 
-_RelExp: RcRef<ExpEval> = {
+_RelExp: ExpEval = {
   <rel_exp: _RelExp> <op: _RelOp> <add_exp: _AddExp> 
-                => RcRef::new(ExpEval::new_binary(rel_exp, op, add_exp)),
+                => ExpEval::new_binary(rel_exp, op, add_exp),
   <_AddExp>     => <>
 };
 
-_EqExp: RcRef<ExpEval> = {
+_EqExp: ExpEval = {
   <eq_exp: _EqExp> <op: _EqOp> <rel_exp: _RelExp> 
-                => RcRef::new(ExpEval::new_binary(eq_exp, op, rel_exp)),
+                => ExpEval::new_binary(eq_exp, op, rel_exp),
   <_RelExp>     => <>
 };
 
-_LAndExp: RcRef<ExpEval> = {
+_LAndExp: ExpEval = {
   <land_exp: _LAndExp> "&&" <eq_exp: _EqExp> 
-                => RcRef::new(ExpEval::new_binary(land_exp, BinaryOp::And, eq_exp)),
+                => ExpEval::new_binary(land_exp, BinaryOp::And, eq_exp),
   <_EqExp>      => <>
 };
 
-_LOrExp: RcRef<ExpEval> = {
+_LOrExp: ExpEval = {
   <lor_exp: _LOrExp> "||" <land_exp: _LAndExp> 
-                => RcRef::new(ExpEval::new_binary(lor_exp, BinaryOp::Or, land_exp)),
+                => ExpEval::new_binary(lor_exp, BinaryOp::Or, land_exp),
   <_LAndExp>    => <>
 };
 
@@ -295,5 +295,5 @@ _IntConst: i32 = {
   r"0[xX][0-9a-fA-F]+"  => i32::from_str_radix(&<>[2..], 16).unwrap()
 };
 
-_ConstExp: RcRef<ExpEval> = 
+_ConstExp: ExpEval = 
   <_Exp> => <>;

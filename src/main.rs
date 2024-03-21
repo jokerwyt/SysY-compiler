@@ -4,16 +4,9 @@ pub mod utils;
 mod pg;
 
 use clap::Parser;
-use ::koopa::ir::builder::ValueBuilder;
 use lalrpop_util::lalrpop_mod;
-use std::env::args;
 use std::fs::read_to_string;
 use std::io::Result;
-
-use ::koopa::ir::*;
-use ::koopa::back::*;
-use ::koopa::ir::builder::BasicBlockBuilder;
-use ::koopa::ir::builder::LocalInstBuilder;
 
 use crate::utils::RcRef;
 
@@ -32,7 +25,6 @@ struct Cli {
   output: String,
   input: String,
 }
-
 
 fn main() -> Result<()> {
   let args = Cli::parse();
