@@ -1,4 +1,7 @@
 pub mod ast;
+pub mod semantics;
+pub mod utils;
+mod pg;
 
 use clap::Parser;
 use ::koopa::ir::builder::ValueBuilder;
@@ -11,6 +14,8 @@ use ::koopa::ir::*;
 use ::koopa::back::*;
 use ::koopa::ir::builder::BasicBlockBuilder;
 use ::koopa::ir::builder::LocalInstBuilder;
+
+use crate::utils::RcRef;
 
 lalrpop_mod!(sysy);
 
@@ -28,6 +33,7 @@ struct Cli {
   input: String,
 }
 
+
 fn main() -> Result<()> {
   let args = Cli::parse();
 
@@ -37,8 +43,10 @@ fn main() -> Result<()> {
 
   let input = read_to_string(input)?;
 
-  let ast: ast::prog::CompUnit = sysy::_CompUnitParser::new().parse(&input).unwrap();
-  println!("{:?}", ast);
+  let ast: RcRef<ast::CompUnit> = sysy::_CompUnitParser::new().parse(&input).unwrap();
+
+  // ast.semantics_analyze();
+
   if args.koopa.is_some() {
     assert!(args.riscv.is_none());
 
