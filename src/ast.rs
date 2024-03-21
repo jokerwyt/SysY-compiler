@@ -1,8 +1,8 @@
-use std::{cell::{OnceCell, RefCell}, collections::HashMap, sync::OnceLock};
-
+use std::cell::RefCell;
+use crate::global_mapper;
 use uuid::Uuid;
 
-use crate::utils::{GlobalMapper, UuidOwner};
+use crate::utils::{UuidMapper, UuidOwner};
 
 /// transfer a AstNode into a specific variant
 macro_rules! ast_into {
@@ -26,26 +26,28 @@ macro_rules! ast_is {
     };
 }
 
+
+
+global_mapper!(AST_NODES, AstNode);
+
+
 /// get const_value: Option<i32> from a AstNodeId.
-fn get_const_value(node: AstNodeId) -> Option<i32> {
-    AST_NODES.with(|nodes| {
-
-      let mut nodes = nodes.borrow_mut();
-        let mut node = nodes.borrow(&node).unwrap();
-        if let AstData::Exp(exp) = &node.ast {
-            exp.const_value
-        } else {
-            panic!("get const value of a non-expression")
-        }
-    })
+pub fn get_const_value(node: AstNodeId) -> Option<i32> {
+  submit(node, |node| {
+    if let AstData::Exp(Exp{const_value, .. }) = &node.ast {
+      *const_value
+    } else {
+      None
+    }
+  })
 }
 
-
-thread_local! {
-  static AST_NODES: RefCell<GlobalMapper<AstNode>> = RefCell::new(GlobalMapper {
-    data: HashMap::new()
-  });
+pub fn get_parent(node: AstNodeId) -> Option<AstNodeId> {
+  submit(node, |node| {
+    node.parent
+  })
 }
+
 
 pub type AstNodeId = Uuid;
 pub type AstBox = Box<AstNode>;
@@ -62,6 +64,8 @@ impl UuidOwner for AstNode {
   }
 }
 
+/// These ~600 lines are used for handle AST building and constant folding.
+/// TODO: Too ugly, refactor it later.
 impl AstNode {
   pub fn new_comp_unit(items: Vec<AstNodeId>) -> AstNodeId {
     AST_NODES.with(|nodes| {

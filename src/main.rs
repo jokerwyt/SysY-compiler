@@ -3,15 +3,11 @@ pub mod semantics;
 pub mod utils;
 mod pg;
 
-use ast::{AstData, AstNodeId};
+use ast::AstNodeId;
 use clap::Parser;
 use lalrpop_util::lalrpop_mod;
 use std::fs::read_to_string;
 use std::io::Result;
-use std::sync::Arc;
-
-use crate::ast::AstNode;
-
 lalrpop_mod!(sysy);
 
 #[derive(Parser, Debug)]

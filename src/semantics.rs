@@ -1,80 +1,68 @@
 // use std::collections::HashMap;
 
-// use crate::ast::*;
-// use crate::utils::RcRef;
-// use std::io::Result;
+use uuid::Uuid;
 
-// pub struct SymbolTable {
-//   pub parent: Option<RcRef<SymbolTable>>,
-//   pub entries: HashMap<String, SymTableEntry>,
-// }
+use crate::ast::*;
+use crate::utils::{UuidOwner, UuidMapper};
+use std::cell::RefCell;
+use crate::global_mapper;
+use std::collections::HashMap;
 
-// pub struct SymTableEntry {
-//   pub ast: AstRcRef, 
-//   pub koopa_id: Option<String>
-// }
+pub struct SymbolTable {
+  pub id: Uuid, 
+  pub entries: HashMap<String, SymTableEntry>,
+}
 
-// pub trait Semantics {
-//   fn analyze(&self, ast: AstRcRef, parent: Option<RcRef<SemaNode>>) -> Option<SemaNode>;
-// }
+impl UuidOwner for SymbolTable {
+  fn id(&self) -> Uuid {
+    self.id
+  }
+} 
 
-// pub struct SemaNode {
-//   pub ast: AstRcRef,
-//   pub parent: Option<RcRef<SemaNode>>,
-//   pub sym_table: Option<RcRef<SymbolTable>>,
-//   pub childrens: Vec<RcRef<SemaNode>>,
-// }
+pub struct SymTableEntry {
+  pub ast: AstNodeId,
+  pub kind: SymTableEntryKind,
+}
 
-// // impl Semantics for SemaNode {
-// //   fn analyze(&self, ast: AstRcRef, parent: Option<RcRef<SemaNode>>) -> Option<SemaNode> {
-//     // let mut ret_node = SemaNode {
-//     //   ast: ast.clone(),
-//     //   parent,
-//     //   sym_table: None,
-//     //   childrens: vec![],
-//     // };
-    
-//     // match ast {
-//     //     AstRcRef::CompUnit(comp_unit) => {
-//     //       // construct global symbol table
-//     //       let mut sym_table = RcRef::new(SymbolTable {
-//     //         parent: None,
-//     //         entries: HashMap::new(),
-//     //       });
-//     //       ret_node.sym_table = Some(sym_table);
+pub enum SymTableEntryKind {
+  FuncDef,
+  ValueDef,
+}
 
-//     //       for item in comp_unit.borrow().iter() {
-//     //         match *item.borrow() {
-//     //           CompUnitItem::FuncDef(ref func_def) => {
-//     //             let func_name = func_def.borrow().ident.clone();
-//     //             let sym_table_entry = SymTableEntry {
-//     //               ast: AstRcRef::FuncDef(func_def.clone()),
-//     //               koopa_id: None,
-//     //             };
-//     //             ret_node.sym_table.as_ref().unwrap().borrow_mut().entries.insert(func_name, sym_table_entry);
-//     //             ret_node.childrens.push(
-//     //               SemaNode::analyze(AstRcRef::FuncDef(func_def.clone()), Some(ret_node.clone()), ret_node.sym_table.clone())
-//     //             );
-//     //           }, 
-//     //           CompUnitItem::Decl(ref decl) => {
-                
-//     //           }
-//     //         }
-//     //       }
-//     //     }, 
-//     //     AstRcRef::FuncDef(_) => todo!(),
-//     //     AstRcRef::Decl(_) => todo!(),
-//     //     AstRcRef::ConstDecl(_) => todo!(),
-//     //     AstRcRef::VarDecl(_) => todo!(),
-//     //     AstRcRef::ConstDef(_) => todo!(),
-//     //     AstRcRef::VarDef(_) => todo!(),
-//     //     AstRcRef::FuncFParam(_) => todo!(),
-//     //     AstRcRef::Block(_) => todo!(),
-//     //     AstRcRef::BlockItem(_) => todo!(),
-//     //     AstRcRef::Stmt(_) => todo!(),
-//     //     AstRcRef::ExpEval(_) => todo!(),
-//     //     AstRcRef::InitVal(_) => todo!(),
-//     // }
-//     // None
-// //   }
-// // }
+global_mapper!(SYMBOLS, SymbolTable);
+
+pub type SymTableId = Uuid;
+
+pub trait SymTableOwner { 
+  fn sym_table_id(&self) -> Option<SymTableId>;
+  fn all_sym_tables(&self) -> Vec<SymTableId>;
+}
+
+impl SymTableOwner for AstNodeId {
+  fn sym_table_id(&self) -> Option<SymTableId> {
+    submit(*self, |table| 
+      Some(table.id)
+    )
+  }
+
+  /// Get all tables on the stack. 
+  /// The first one is the global table, and the last one is the current table
+  /// Therefore, the return length is at least one.
+  fn all_sym_tables(&self) -> Vec<SymTableId> {
+    let my_table = self.sym_table_id();
+
+    let mut higher = if let Some(table) = get_parent(*self) {
+      table.all_sym_tables()
+    } else {
+      vec![]
+    };
+
+    higher.extend(my_table);
+    higher
+  }
+}
+
+pub trait Analyzable {
+  fn semantics_analyze(&self);
+}
+
