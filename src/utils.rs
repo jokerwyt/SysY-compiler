@@ -78,7 +78,7 @@ pub trait UuidOwner {
 /// A macro generates a thread_local static variable and the submit functions.
 #[macro_export]
 macro_rules! global_mapper {
-  ($name:ident, $submit_name:ident, $value_type:ty) => {
+  ($name:ident, $submit_name:ident, $register_name:ident, $value_type:ty) => {
     thread_local! {
       static $name: RefCell<UuidMapper<$value_type>> = RefCell::new(UuidMapper::new());
     }
@@ -91,6 +91,13 @@ macro_rules! global_mapper {
         let tables = tables.borrow_mut();
         let mut table = tables.borrow_mut(&id).unwrap();
         closure(&mut table)
+      })
+    }
+
+    pub fn $register_name(data: $value_type) -> Uuid {
+      $name.with(|tables| {
+        let mut tables = tables.borrow_mut();
+        tables.register(data)
       })
     }
   };

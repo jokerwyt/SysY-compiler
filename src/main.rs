@@ -1,13 +1,10 @@
-pub mod ast;
-pub mod semantics;
-pub mod utils;
 mod pg;
-
-use ast::AstNodeId;
+use sysy_compiler::ast::AstNodeId;
 use clap::Parser;
 use lalrpop_util::lalrpop_mod;
 use std::fs::read_to_string;
 use std::io::Result;
+
 lalrpop_mod!(sysy);
 
 #[derive(Parser, Debug)]
