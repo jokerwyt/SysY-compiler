@@ -61,10 +61,10 @@ impl<T: UuidOwner> UuidMapper<T> {
     }
   }
 
-  pub fn insert(&mut self, data: T) -> Uuid {
+  pub fn register(&mut self, data: T) -> Uuid {
     let id = data.id();
     if self.data.contains_key(&id) {
-      panic!("GlobalMapper: id already exists");
+      panic!("UuidMapper: the id to register already exists");
     }
     self.data.insert(id, RefCell::new(data));
     id
@@ -78,14 +78,14 @@ pub trait UuidOwner {
 /// A macro generates a thread_local static variable and the submit functions.
 #[macro_export]
 macro_rules! global_mapper {
-  ($name:ident, $type:ty) => {
+  ($name:ident, $submit_name:ident, $value_type:ty) => {
     thread_local! {
-      static $name: RefCell<UuidMapper<$type>> = RefCell::new(UuidMapper::new());
+      static $name: RefCell<UuidMapper<$value_type>> = RefCell::new(UuidMapper::new());
     }
 
-    pub fn submit<F, R>(id: Uuid, closure: F) -> R
+    pub fn $submit_name<F, R>(id: Uuid, closure: F) -> R
     where 
-      F: FnOnce(&mut $type) -> R
+      F: FnOnce(&mut $value_type) -> R
     {
       $name.with(|tables| {
         let tables = tables.borrow_mut();

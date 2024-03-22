@@ -63,7 +63,12 @@ match {
 //! LAndExp       ::= EqExp | LAndExp "&&" EqExp;
 //! LOrExp        ::= LAndExp | LOrExp "||" LAndExp;
 //! ConstExp      ::= Exp;
-
+//!
+//!
+//! How to determine the variant of AstNode?
+//! new_XXX_YYY() indicates the variant is AstData::XXX. 
+//! YYY further indicates the inside enum variant.
+//!
 Comma<T>: Vec<T> = { 
     <mut v:(<T> ",")*> <e:T?> => match e {
         None => v,
@@ -202,7 +207,7 @@ _LVal: AstNodeId = {
 _PrimaryExp: AstNodeId = {
   "(" <_Exp> ")"  => <>,
   <_LVal>         => <>,
-  <_Number>       => AstNode::new_primary_exp_number(<>)
+  <_Number>       => AstNode::new_exp_number(<>)
 };
 
 _Number: i32 = {

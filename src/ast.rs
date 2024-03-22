@@ -5,6 +5,7 @@ use uuid::Uuid;
 use crate::utils::{UuidMapper, UuidOwner};
 
 /// transfer a AstNode into a specific variant
+#[allow(unused_macros)]
 macro_rules! ast_into {
     ($node:expr, $variant:ident) => {
         if let AstData::$variant(data) = &$node.ast {
@@ -16,6 +17,7 @@ macro_rules! ast_into {
 }
 
 /// return true if the AstNode is a specific variant
+#[allow(unused_macros)]
 macro_rules! ast_is {
     ($node:expr, $variant:ident) => {
         if let AstData::$variant(_) = &$node.ast {
@@ -26,14 +28,12 @@ macro_rules! ast_is {
     };
 }
 
-
-
-global_mapper!(AST_NODES, AstNode);
+global_mapper!(AST_NODES, ast_nodes_submit, AstNode);
 
 
 /// get const_value: Option<i32> from a AstNodeId.
 pub fn get_const_value(node: AstNodeId) -> Option<i32> {
-  submit(node, |node| {
+  ast_nodes_submit(node, |node| {
     if let AstData::Exp(Exp{const_value, .. }) = &node.ast {
       *const_value
     } else {
@@ -42,8 +42,14 @@ pub fn get_const_value(node: AstNodeId) -> Option<i32> {
   })
 }
 
+pub fn get_ast_data(node: AstNodeId) -> AstData {
+  ast_nodes_submit(node, |node| {
+    node.ast.clone()
+  })
+}
+
 pub fn get_parent(node: AstNodeId) -> Option<AstNodeId> {
-  submit(node, |node| {
+  ast_nodes_submit(node, |node| {
     node.parent
   })
 }
@@ -77,7 +83,7 @@ impl AstNode {
         node.parent = Some(cur_id);
       }
 
-       nodes.insert(AstNode {
+       nodes.register(AstNode {
           id: cur_id, 
           ast: AstData::CompUnit(CompUnit(items)),
           parent: None,
@@ -103,7 +109,7 @@ impl AstNode {
         node.parent = Some(cur_id);
       }
 
-      nodes.insert(AstNode {
+      nodes.register(AstNode {
           id: cur_id,
           ast: AstData::ConstDef(ConstDef {
             ident,
@@ -126,7 +132,7 @@ impl AstNode {
         node.parent = Some(cur_id);
       }
 
-      nodes.insert(AstNode {
+      nodes.register(AstNode {
           id: cur_id, 
           ast: AstData::ConstInitVal(ConstInitVal::Single(exp)),
           parent: None,
@@ -148,7 +154,7 @@ impl AstNode {
         node.parent = Some(cur_id);
       }
 
-      nodes.insert(AstNode {
+      nodes.register(AstNode {
           id: cur_id, 
           ast: AstData::ConstInitVal(ConstInitVal::Sequence(exps)),
           parent: None,
@@ -169,7 +175,7 @@ impl AstNode {
         node.parent = Some(cur_id);
       }
 
-      nodes.insert(AstNode {
+      nodes.register(AstNode {
           id: cur_id, 
           ast: AstData::VarDef(VarDef {
             ident,
@@ -193,7 +199,7 @@ impl AstNode {
     AST_NODES.with(|nodes| {
 
       let mut nodes = nodes.borrow_mut();
-      let cur_id = nodes.insert(AstNode {
+      let cur_id = nodes.register(AstNode {
           id: Uuid::new_v4(),
           ast: AstData::InitVal(InitVal::Single(exp)),
           parent: None,
@@ -215,7 +221,7 @@ impl AstNode {
         let mut node = nodes.borrow_mut(&exp).unwrap();
         node.parent = Some(cur_id);
       }
-      nodes.insert(AstNode {
+      nodes.register(AstNode {
           id: cur_id,
           ast: AstData::InitVal(InitVal::Sequence(exps)),
           parent: None,
@@ -236,7 +242,7 @@ impl AstNode {
         node.parent = Some(cur_id);
       }
 
-      let cur_id = nodes.insert(AstNode {
+      let cur_id = nodes.register(AstNode {
           id: cur_id, 
           ast: AstData::FuncDef(FuncDef {
             has_retval,
@@ -268,7 +274,7 @@ impl AstNode {
         }
       }
       
-      nodes.insert(AstNode {
+      nodes.register(AstNode {
           id: cur_id, 
           ast: AstData::FuncFParam(FuncFParam {
             ident,
@@ -291,7 +297,7 @@ impl AstNode {
         node.parent = Some(cur_id);
       }
       
-      nodes.insert(AstNode {
+      nodes.register(AstNode {
           id: cur_id, 
           ast: AstData::Block(Block {
             items,
@@ -307,7 +313,7 @@ impl AstNode {
     AST_NODES.with(|nodes| {
 
       let mut nodes = nodes.borrow_mut();
-      let cur_id = nodes.insert(AstNode {
+      let cur_id = nodes.register(AstNode {
           id: Uuid::new_v4(),
           ast: AstData::BlockItem(BlockItem::Decl(decl)),
           parent: None,
@@ -324,7 +330,7 @@ impl AstNode {
     AST_NODES.with(|nodes| {
 
       let mut nodes = nodes.borrow_mut();
-      let cur_id = nodes.insert(AstNode {
+      let cur_id = nodes.register(AstNode {
           id: Uuid::new_v4(),
           ast: AstData::BlockItem(BlockItem::Stmt(stmt)),
           parent: None,
@@ -341,7 +347,7 @@ impl AstNode {
     AST_NODES.with(|nodes| {
 
       let mut nodes = nodes.borrow_mut();
-      let cur_id = nodes.insert(AstNode {
+      let cur_id = nodes.register(AstNode {
           id: Uuid::new_v4(),
           ast: AstData::Stmt(Stmt::IfElse(exp, if_block, else_block)),
           parent: None,
@@ -366,7 +372,7 @@ impl AstNode {
     AST_NODES.with(|nodes| {
 
       let mut nodes = nodes.borrow_mut();
-      let cur_id = nodes.insert(AstNode {
+      let cur_id = nodes.register(AstNode {
           id: Uuid::new_v4(),
           ast: AstData::Stmt(Stmt::While(exp, block)),
           parent: None,
@@ -386,7 +392,7 @@ impl AstNode {
     AST_NODES.with(|nodes| {
 
       let mut nodes = nodes.borrow_mut();
-      let cur_id = nodes.insert(AstNode {
+      let cur_id = nodes.register(AstNode {
           id: Uuid::new_v4(),
           ast: AstData::Stmt(Stmt::Assign(lval, exp)),
           parent: None,
@@ -406,7 +412,7 @@ impl AstNode {
     AST_NODES.with(|nodes| {
 
       let mut nodes = nodes.borrow_mut();
-      let cur_id = nodes.insert(AstNode {
+      let cur_id = nodes.register(AstNode {
           id: Uuid::new_v4(),
           ast: AstData::Stmt(Stmt::Exp(exp)),
           parent: None,
@@ -425,7 +431,7 @@ impl AstNode {
     AST_NODES.with(|nodes| {
 
       let mut nodes = nodes.borrow_mut();
-      nodes.insert(AstNode {
+      nodes.register(AstNode {
           id: Uuid::new_v4(),
           ast: AstData::Stmt(Stmt::Break),
           parent: None,
@@ -437,7 +443,7 @@ impl AstNode {
     AST_NODES.with(|nodes| {
 
       let mut nodes = nodes.borrow_mut();
-      nodes.insert(AstNode {
+      nodes.register(AstNode {
           id: Uuid::new_v4(),
           ast: AstData::Stmt(Stmt::Continue),
           parent: None,
@@ -449,7 +455,7 @@ impl AstNode {
     AST_NODES.with(|nodes| {
 
       let mut nodes = nodes.borrow_mut();
-      let cur_id = nodes.insert(AstNode {
+      let cur_id = nodes.register(AstNode {
           id: Uuid::new_v4(),
           ast: AstData::Stmt(Stmt::Return(exp)),
           parent: None,
@@ -476,7 +482,7 @@ impl AstNode {
         node.parent = Some(cur_id);
       }
       
-      nodes.insert(AstNode {
+      nodes.register(AstNode {
           id: cur_id,
           ast: AstData::LVal(LVal {
               name,
@@ -490,11 +496,11 @@ impl AstNode {
     })
   }
 
-  pub fn new_primary_exp_number(num: i32) -> AstNodeId {
+  pub fn new_exp_number(num: i32) -> AstNodeId {
     AST_NODES.with(|nodes| {
 
       let mut nodes = nodes.borrow_mut();
-      nodes.insert(AstNode {
+      nodes.register(AstNode {
           id: Uuid::new_v4(),
           ast: AstData::Exp(Exp {
               exp_data: ExpData::Number(num),
@@ -516,7 +522,7 @@ impl AstNode {
         node.parent = Some(cur_id);
       }
       
-      nodes.insert(AstNode {
+      nodes.register(AstNode {
           id: cur_id, 
           ast: AstData::Exp(Exp {
               exp_data: ExpData::Call(ident, args),
@@ -533,7 +539,7 @@ impl AstNode {
     AST_NODES.with(|nodes| {
 
       let mut nodes = nodes.borrow_mut();
-      let cur_id = nodes.insert(AstNode {
+      let cur_id = nodes.register(AstNode {
           id: Uuid::new_v4(),
           ast: AstData::Exp(Exp {
               exp_data: ExpData::Unary(op, exp),
@@ -560,7 +566,7 @@ impl AstNode {
     AST_NODES.with(|nodes| {
 
       let mut nodes = nodes.borrow_mut();
-      let cur_id = nodes.insert(AstNode {
+      let cur_id = nodes.register(AstNode {
           id: Uuid::new_v4(),
           ast: AstData::Exp(Exp {
               exp_data: ExpData::Binary(lhs, op, rhs),
@@ -597,7 +603,7 @@ impl AstNode {
         node.parent = Some(cur_id);
       }
       
-      nodes.insert(AstNode {
+      nodes.register(AstNode {
           id: cur_id, 
           ast: AstData::ConstDecl(ConstDecl(const_defs)),
           parent: None,
@@ -617,7 +623,7 @@ impl AstNode {
         node.parent = Some(cur_id);
       }
       
-      nodes.insert(AstNode {
+      nodes.register(AstNode {
           id: cur_id, 
           ast: AstData::VarDecl(VarDecl {
               var_defs,
@@ -632,7 +638,7 @@ impl AstNode {
 }
 
 
-
+#[derive(Clone)]
 pub enum AstData {
   CompUnit(CompUnit),
   FuncDef(FuncDef),
@@ -652,38 +658,39 @@ pub enum AstData {
 
 pub type Ident = String;
 
-pub struct CompUnit(Vec<AstNodeId>);
+#[derive(Clone)]
+pub struct CompUnit(pub Vec<AstNodeId>);
 
-pub struct FuncFParams(Vec<AstNodeId>);
+pub struct FuncFParams(pub Vec<AstNodeId>);
 
 pub enum CompUnitItem {
   FuncDef(AstNodeId),
   Decl(AstNodeId),
 }
 
-pub enum Decl {
-  Const(AstNodeId),
-  Var(AstNodeId),
-} 
-
+#[derive(Clone)]
 pub struct ConstDecl(Vec<AstNodeId>);
 
+#[derive(Clone)]
 pub struct ConstDef {
   pub ident: Ident,
   pub idx: Vec<AstNodeId>, // alternative array index
   pub const_init_val: AstNodeId
 }
 
+#[derive(Clone)]
 pub struct VarDecl {
   pub var_defs: Vec<AstNodeId>,
 }
 
+#[derive(Clone)]
 pub struct VarDef {
   pub ident: Ident,
   pub idx: Vec<AstNodeId>, // alternative array index
   pub init_val: Option<AstNodeId>
 }
 
+#[derive(Clone)]
 pub struct FuncDef {
   /// void or int
   pub has_retval: bool, 
@@ -693,16 +700,20 @@ pub struct FuncDef {
   pub block: AstNodeId,
 }
 
+
+#[derive(Clone)]
 pub struct Block {
   pub items: Vec<AstNodeId>,
 }
 
 
+#[derive(Clone)]
 pub enum BlockItem {
   Decl(AstNodeId),
   Stmt(AstNodeId),
 }
 
+#[derive(Clone)]
 pub enum Stmt {
   Assign(AstNodeId, AstNodeId),
   Exp (Option<AstNodeId>),
@@ -715,11 +726,13 @@ pub enum Stmt {
   Empty, // ;
 }
 
+#[derive(Clone)]
 pub enum ConstInitVal {
   Single(AstNodeId),
   Sequence(Vec<AstNodeId>)
 }
 
+#[derive(Clone)]
 pub enum InitVal {
   Single(AstNodeId),
   Sequence(Vec<AstNodeId>)
@@ -730,6 +743,7 @@ pub enum FuncType {
   Int
 }
 
+#[derive(Clone)]
 pub struct FuncFParam {
   pub ident: Ident,
 
@@ -737,6 +751,7 @@ pub struct FuncFParam {
   pub shape_exclude_first_dimension: Option<Vec<AstNodeId>>,
 }
 
+#[derive(Clone)]
 pub struct LVal {
   pub name: Ident, 
   pub idx: Vec<AstNodeId>,
@@ -744,11 +759,13 @@ pub struct LVal {
 
 pub type Number = i32;
 
+#[derive(Clone)]
 pub struct Exp {
   pub exp_data: ExpData,
   pub const_value: Option<i32>
 }
 
+#[derive(Clone)]
 pub enum ExpData {
   LVal(AstNodeId), 
   Number(i32),
