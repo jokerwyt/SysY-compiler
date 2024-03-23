@@ -25,11 +25,11 @@ fn main() -> Result<()> {
   let args = Cli::parse();
 
   let input = args.input;
-  let output = args.output;
+  let _output = args.output;
 
   let input = read_to_string(input)?;
 
-  let ast: AstNodeId = sysy::_CompUnitParser::new().parse(&input).unwrap();
+  let _ast: AstNodeId = sysy::_CompUnitParser::new().parse(&input).unwrap();
 
   // ast.semantics_analyze();
 
@@ -38,7 +38,7 @@ fn main() -> Result<()> {
 
     // compile my ast 
   } else {
-    let mut prog = koopa::ir::Program::new();
+    let _prog = koopa::ir::Program::new();
     // let main = prog.new_func(FunctionData::with_param_names(
     //   "@main".into(),
     //   vec![],

@@ -1,4 +1,4 @@
-use std::fmt::{Display, Formatter};
+use std::fmt::{Formatter};
 
 use crate::{define_wrapper, global_mapper, utils::dfs::TreeId};
 use uuid::Uuid;

@@ -10,7 +10,7 @@ use crate::utils::dfs::{DfsVisitor, TreeId};
 use crate::{ast, ast_is, ast::ast_nodes_read, ast::ast_nodes_write};
 use crate::ast::{AstNodeId, BinaryOp, UnaryOp};
 use crate::utils::uuid_mapper::UuidOwner;
-use crate::{ast_into, ast_node_into, ast_data_write_as, define_wrapper, global_mapper};
+use crate::{ast_data_write_as, define_wrapper, global_mapper};
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 
@@ -330,32 +330,31 @@ impl Semantics for AstNodeId {
   fn children_ty_sanify_check(&self) -> SemaRes {
     return Ok(()); // TODO: future work.
 
-
-    let ast_data = self.get_ast_data();
-    match ast_data {
-      ast::AstData::CompUnit(_) => todo!(),
-      ast::AstData::Decl(_) => todo!(),
-      ast::AstData::ConstDecl(_) => todo!(),
-      ast::AstData::BType => todo!(),
-      ast::AstData::ConstDef(_) => todo!(),
-      ast::AstData::ConstInitVal(_) => todo!(),
-      ast::AstData::VarDecl(_) => todo!(),
-      ast::AstData::VarDef(_) => todo!(),
-      ast::AstData::InitVal(_) => todo!(),
-      ast::AstData::FuncDef(_) => todo!(),
-      ast::AstData::FuncFParams(_) => todo!(),
-      ast::AstData::FuncFParam(_) => todo!(),
-      ast::AstData::Block(_) => todo!(),
-      ast::AstData::BlockItem(_) => todo!(),
-      ast::AstData::Stmt(_) => todo!(),
-      ast::AstData::Exp(_) => todo!(),
-      ast::AstData::LVal(_) => todo!(),
-      ast::AstData::PrimaryExp(_) => todo!(),
-      ast::AstData::UnaryExp(_) => todo!(),
-      ast::AstData::FuncRParams(_) => todo!(),
-      ast::AstData::BinaryExp(_) => todo!(),
-      ast::AstData::ConstExp(_) => todo!(),
-    }
+    // let ast_data = self.get_ast_data();
+    // match ast_data {
+    //   ast::AstData::CompUnit(_) => todo!(),
+    //   ast::AstData::Decl(_) => todo!(),
+    //   ast::AstData::ConstDecl(_) => todo!(),
+    //   ast::AstData::BType => todo!(),
+    //   ast::AstData::ConstDef(_) => todo!(),
+    //   ast::AstData::ConstInitVal(_) => todo!(),
+    //   ast::AstData::VarDecl(_) => todo!(),
+    //   ast::AstData::VarDef(_) => todo!(),
+    //   ast::AstData::InitVal(_) => todo!(),
+    //   ast::AstData::FuncDef(_) => todo!(),
+    //   ast::AstData::FuncFParams(_) => todo!(),
+    //   ast::AstData::FuncFParam(_) => todo!(),
+    //   ast::AstData::Block(_) => todo!(),
+    //   ast::AstData::BlockItem(_) => todo!(),
+    //   ast::AstData::Stmt(_) => todo!(),
+    //   ast::AstData::Exp(_) => todo!(),
+    //   ast::AstData::LVal(_) => todo!(),
+    //   ast::AstData::PrimaryExp(_) => todo!(),
+    //   ast::AstData::UnaryExp(_) => todo!(),
+    //   ast::AstData::FuncRParams(_) => todo!(),
+    //   ast::AstData::BinaryExp(_) => todo!(),
+    //   ast::AstData::ConstExp(_) => todo!(),
+    // }
   }
   
   /// Preprocess the node before the children are processed.

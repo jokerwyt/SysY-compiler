@@ -1,5 +1,5 @@
 use lalrpop_util::lalrpop_mod;
-use sysy_compiler::{ast::{self, ast_nodes_read, AstNodeId}, ast_data_read_as, ast_into, ast_is, ast_node_into, semantics::Semantics};
+use sysy_compiler::{ast::{self, ast_nodes_read, AstNodeId}, ast_data_read_as, ast_is, semantics::Semantics};
 lalrpop_mod!(sysy);
 
 
