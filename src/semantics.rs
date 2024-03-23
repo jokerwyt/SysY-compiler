@@ -1,12 +1,16 @@
+//! Semantics analysis
+//! - Symbol tables
 //! Symbol tables are associated with an AST node, and indexed by the AST node's AstNodeId.
+//! 
+//! - Constant folding
 
 use uuid::Uuid;
 
 use crate::utils::dfs::{DfsVisitor, TreeId};
-use crate::{ast, ast_is, ast::ast_nodes_submit};
+use crate::{ast, ast_is, ast::ast_nodes_read, ast::ast_nodes_write};
 use crate::ast::AstNodeId;
 use crate::utils::uuid_mapper::UuidOwner;
-use crate::{define_wrapper, global_mapper};
+use crate::{ast_into, ast_node_into, define_wrapper, global_mapper};
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 
@@ -49,16 +53,6 @@ impl std::hash::Hash for SymIdent {
   }
 }
 
-// impl PartialEq for SymIdent {
-//   fn eq(&self, other: &Self) -> bool {
-//     match (self, other) {
-//       (SymIdent::Func(s1), SymIdent::Func(s2)) => s1 == s2,
-//       (SymIdent::Value(s1), SymIdent::Value(s2)) => s1 == s2,
-//       _ => false
-//     }
-//   }
-// }
-
 // impl Eq for SymIdent {}
 
 impl SymbolTable {
@@ -88,7 +82,7 @@ impl SymTableEntry {
   /// Insert the entry into the last level symbol table of the given ast node.
   fn into_llt(self, id: &AstNodeId) -> SemaRes {
     let table_id = id.last_level_sym_table();
-    sym_tables_submit(&table_id.inner().inner(), |table| {
+    sym_tables_write(&table_id.inner().inner(), |table| {
       table.insert_entry(self)
     })?
   }
@@ -116,7 +110,7 @@ impl SymTableEntryKind {
   }
 }
 
-global_mapper!(SYMBOLS, sym_tables_submit, sym_tables_register, SymbolTable);
+global_mapper!(SYMBOLS, sym_tables_read, sym_tables_write, sym_tables_register, SymbolTable);
 
 define_wrapper!(SymTableId, AstNodeId);
 
@@ -140,7 +134,7 @@ impl SymTableOwner for AstNodeId {
   }
 
   fn sym_table_id(&self) -> Result<SymTableId, String> {
-    sym_tables_submit(self.inner(), |table| {
+    sym_tables_read(self.inner(), |table| {
       Ok(table.id.clone())
     }).unwrap()
   }
@@ -237,18 +231,43 @@ impl Semantics for AstNodeId {
       ast::AstData::Decl(_) => { }
       ast::AstData::ConstDecl(_) => { }
       ast::AstData::BType => { }
-      ast::AstData::ConstDef(_) => todo!(),
-      ast::AstData::ConstInitVal(_) => todo!(),
-      ast::AstData::VarDecl(_) => todo!(),
-      ast::AstData::VarDef(_) => todo!(),
-      ast::AstData::InitVal(_) => todo!(),
-      ast::AstData::FuncDef(_) => todo!(),
-      ast::AstData::FuncFParams(_) => todo!(),
-      ast::AstData::FuncFParam(_) => todo!(),
-      ast::AstData::Block(_) => todo!(),
-      ast::AstData::BlockItem(_) => todo!(),
-      ast::AstData::Stmt(_) => todo!(),
-      ast::AstData::Exp(_) => todo!(),
+      ast::AstData::ConstDef(_) => { }
+      ast::AstData::ConstInitVal(c_init_val) => {
+        match c_init_val {
+          ast::ConstInitVal::Single(const_exp, _) => {
+            ast_nodes_write(self.inner(), |node| {
+              let data = ast_node_into!(node, ConstExp);
+              data.1 = const_exp.const_single_value();
+            })?;
+          },
+          ast::ConstInitVal::Sequence(_) => ()
+        };
+      }
+      ast::AstData::VarDecl(_) => { }
+      ast::AstData::VarDef(_) => { }
+      ast::AstData::InitVal(init_val) => {
+        match init_val {
+            ast::InitVal::Single(exp, _) => {
+              ast_nodes_write(self.inner(), |node| {
+                let data = ast_node_into!(node, ConstExp);
+                data.1 = exp.const_single_value();
+              })?;
+            }
+            ast::InitVal::Sequence(_, _) => ()
+        }
+      }
+      ast::AstData::FuncDef(_) => { }
+      ast::AstData::FuncFParams(_) => { }
+      ast::AstData::FuncFParam(_) => { }
+      ast::AstData::Block(_) => { }
+      ast::AstData::BlockItem(_) => { }
+      ast::AstData::Stmt(_) => { }
+      ast::AstData::Exp(exp) => {
+        ast_nodes_write(self.inner(), |node| {
+          let data = ast_node_into!(node, ConstExp);
+          data.1 = exp.l_or_exp.const_single_value();
+        })?;
+      }
       ast::AstData::LVal(_) => todo!(),
       ast::AstData::PrimaryExp(_) => todo!(),
       ast::AstData::UnaryExp(_) => todo!(),

@@ -51,7 +51,7 @@ pub trait UuidOwner {
 /// 
 #[macro_export]
 macro_rules! global_mapper {
-  ($name:ident, $submit_name:ident, $register_name:ident, $value_type:ty) => {
+  ($name:ident, $read_func_name:ident, $write_func_name:ident, $register_name:ident, $value_type:ty) => {
     thread_local! {
       static $name: std::cell::RefCell<crate::utils::uuid_mapper::UuidMapper<$value_type>> 
         = std::cell::RefCell::new(crate::utils::uuid_mapper::UuidMapper::new());
@@ -59,7 +59,22 @@ macro_rules! global_mapper {
 
     /// Submit a closure to the UuidMapper with the given id.
     /// Returns Err if the id does not exist.
-    pub fn $submit_name<F, R>(id: &Uuid, closure: F) -> Result<R, String>
+    pub fn $read_func_name<F, R>(id: &Uuid, closure: F) -> Result<R, String>
+    where 
+      F: FnOnce(&$value_type) -> R
+    {
+      $name.with(|values| {
+        let values = values.borrow();
+        let value = values.borrow(id);
+        if let Some(value) = value {
+          return Ok(closure(&value));
+        } else {
+          return Err(format!("UuidMapper {}: id {} does not exist", stringify!($name), id));
+        }
+      })
+    }
+
+    pub fn $write_func_name<F, R>(id: &Uuid, closure: F) -> Result<R, String>
     where 
       F: FnOnce(&mut $value_type) -> R
     {
@@ -72,7 +87,7 @@ macro_rules! global_mapper {
           return Err(format!("UuidMapper {}: id {} does not exist", stringify!($name), id));
         }
       })
-    }
+    }  
 
     /// Register a new value and return its id.
     /// 

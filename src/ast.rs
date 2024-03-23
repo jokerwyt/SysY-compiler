@@ -7,36 +7,104 @@ use crate::utils::uuid_mapper::UuidOwner;
 /// specific variant of AstData.
 #[macro_export]
 macro_rules! ast_is {
-    ($node_id:expr, $variant:ident) => {
-        ast_nodes_submit(
-            $node_id,
-            |node| matches!(&node.ast, ast::AstData::$variant(_)),
-        ).unwrap()
-    };
+  ($node_id:expr, $variant:ident) => {
+    ast_nodes_read(
+      $node_id,
+      |node| matches!(&node.ast, ast::AstData::$variant(_)),
+    ).unwrap()
+  };
 }
 
-global_mapper!(AST_NODES, ast_nodes_submit, ast_nodes_register, AstNode);
+/// Convert an &mut AstNode into &mut AstData::$variant
+#[macro_export]
+macro_rules! ast_node_into {
+  ($node:expr, $variant:ident) => {
+    if let ast::AstData::$variant(data) = &mut $node.ast {
+      data
+    } else {
+      panic!("ast_as!() failed")
+    }
+  };
+}
+
+/// Convert a &AstNode into AstData::$variant
+#[macro_export]
+macro_rules! ast_into {
+  ($node_id:expr, $variant:ident) => {
+    ast_nodes_read(
+      $node_id,
+      |node| {
+        if let ast::AstData::$variant(data) = &node.ast {
+          data.clone()
+        } else {
+          panic!("ast_as!() failed")
+        }
+      },
+    ).unwrap()
+  };
+}
+
+
+global_mapper!(AST_NODES, ast_nodes_read, ast_nodes_write, ast_nodes_register, AstNode);
+
 
 impl AstNodeId {
   /// # Panic
   /// Panic if the AstNodeId does not exist.
   pub fn get_ast_data(&self) -> AstData {
-    ast_nodes_submit(self.inner(), |node| {
+    ast_nodes_read(self.inner(), |node| {
       node.ast.clone()
     }).unwrap()
   }
   
-  pub fn const_single_value(&self) -> i32 {
+  /// Get const single value inside of a node
+  /// Returns None if the node can not be evaluated to a single value due to variables.
+  /// # Panic
+  /// Panic if the AstNodeId does not exist.\
+  /// Panic if there is no const single value slot in this node.\
+  /// Panic if the const value is not evaluated for nodes that must have a const value.
+  pub fn const_single_value(&self) -> Option<i32> {
     match self.get_ast_data() {
-        AstData::ConstInitVal(_) => todo!(),
-        AstData::InitVal(_) => todo!(),
-        AstData::Exp(_) => todo!(),
-        AstData::LVal(_) => todo!(),
-        AstData::PrimaryExp(_) => todo!(),
-        AstData::UnaryExp(_) => todo!(),
-        AstData::FuncRParams(_) => todo!(),
-        AstData::BinaryExp(_) => todo!(),
-        AstData::ConstExp(_) => todo!(),
+        AstData::ConstInitVal(c_init_val) => {
+            match c_init_val {
+                ConstInitVal::Single(_, v) => v,
+                _ => panic!("A const init val is not evaluated when const_single_value()")
+            }
+        }
+        AstData::InitVal(InitVal::Single(_, v)) => v,
+        AstData::Exp(exp) => {
+          match exp {
+            Exp{const_value: Some(v), ..} => Some(v),
+            _ => None
+          }
+        }
+        AstData::PrimaryExp(exp) => {
+          match exp {
+            PrimaryExp::Exp(_, Some(v)) |
+            PrimaryExp::Number(v) => Some(v),
+            _ => None
+          }
+        }
+        AstData::UnaryExp(exp) => {
+          match exp {
+            UnaryExp::PrimaryExp{const_value: Some(v), ..} | 
+            UnaryExp::Unary{const_value: Some(v), ..} => Some(v),
+            _ => None
+          }
+        }
+        AstData::BinaryExp(exp) => {
+          match exp {
+            BinaryExp::Unary{const_value: Some(v), ..} |
+            BinaryExp::Binary{const_value: Some(v), ..} => Some(v),
+            _ => None
+          }
+        }
+        AstData::ConstExp(exp) => {
+          match exp {
+            ConstExp(_, Some(v)) => Some(v),
+            _ => None
+          }
+        }
         _ => panic!("There is no const single value slot in this node")
     }
   }
@@ -127,12 +195,12 @@ impl AstNode {
   }
 
   pub fn new_init_val_single(exp: AstNodeId) -> AstNodeId {
-    let ast = AstData::InitVal(InitVal::Single{exp});
+    let ast = AstData::InitVal(InitVal::Single(exp, None));
     AstNode::register(AstNode::new(ast))
   }
 
   pub fn new_init_val_sequence(init_vals: Vec<AstNodeId>) -> AstNodeId {
-    let ast = AstData::InitVal(InitVal::Sequence{init_vals});
+    let ast = AstData::InitVal(InitVal::Sequence(init_vals, None));
     AstNode::register(AstNode::new(ast))
   }
 
@@ -262,7 +330,7 @@ impl AstNode {
   }
 
   pub fn new_const_exp(exp: AstNodeId) -> AstNodeId {
-    let ast = AstData::ConstExp(ConstExp(exp, 0));
+    let ast = AstData::ConstExp(ConstExp(exp, None));
     AstNode::register(AstNode::new(ast))
   }
 
@@ -344,8 +412,8 @@ impl AstData {
         }
         res
       },
-      AstData::InitVal(InitVal::Single{exp}) => vec![exp.clone()],
-      AstData::InitVal(InitVal::Sequence{init_vals}) => init_vals.clone(),
+      AstData::InitVal(InitVal::Single(exp, _)) => vec![exp.clone()],
+      AstData::InitVal(InitVal::Sequence(init_vals, _)) => init_vals.clone(),
       AstData::FuncDef(FuncDef{func_f_params, block, ..}) => vec![func_f_params.clone(), block.clone()],
       AstData::FuncFParams(FuncFParams{params}) => params.clone(),
       AstData::FuncFParam(FuncFParam::Single{btype, ..}) => vec![btype.clone()],
@@ -473,14 +541,11 @@ impl VarDef {
 
 #[derive(Clone)]
 pub enum InitVal {
-  Single{
-    /// [AstData::Exp]
-    exp: AstNodeId
-  },
-  Sequence{
-    /// [AstData::InitVal]
-    init_vals: Vec<AstNodeId>
-  }
+  /// [AstData::Exp]
+  Single(AstNodeId, Option<i32>),
+
+  /// [AstData::InitVal]
+  Sequence(Vec<AstNodeId>, Option<i32>)
 }
 
 #[derive(Clone)]
@@ -720,7 +785,7 @@ impl BinaryOp {
 
 #[derive(Clone)]
 /// Contains an [AstData::Exp]
-pub struct ConstExp(pub AstNodeId, pub i32);
+pub struct ConstExp(pub AstNodeId, pub Option<i32>);
 
 impl TreeId for AstNodeId {
   /// get parent AstNodeId
@@ -728,7 +793,7 @@ impl TreeId for AstNodeId {
   /// # Panic
   /// Panic if the AstNodeId does not exist.
   fn get_parent(&self) -> Option<AstNodeId> {
-    ast_nodes_submit(&self.0, |node| {
+    ast_nodes_read(&self.0, |node| {
       node.parent.clone()
     }).unwrap()
   }
