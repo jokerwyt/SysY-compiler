@@ -6,7 +6,7 @@ pub mod dfs;
 #[macro_export]
 macro_rules! define_wrapper {
   ($name:ident, $inner:ty) => {
-    #[derive(Debug, Clone)]
+    #[derive(Clone)]
     pub struct $name(pub $inner);
     impl Into<$inner> for $name {
       fn into(self) -> $inner {

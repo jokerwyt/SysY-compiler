@@ -116,7 +116,7 @@ define_wrapper!(SymTableId, AstNodeId);
 
 pub trait SymTableOwner { 
   fn create_symbol_table(&self); 
-  fn sym_table_id(&self) -> Result<SymTableId, String>;
+  fn get_sym_table(&self) -> Option<SymTableId>;
   fn all_sym_tables(&self) -> Vec<SymTableId>;
   fn last_level_sym_table(&self) -> SymTableId;
   fn global_sym_table(&self) -> SymTableId;
@@ -133,26 +133,25 @@ impl SymTableOwner for AstNodeId {
     })
   }
 
-  fn sym_table_id(&self) -> Result<SymTableId, String> {
-    sym_tables_read(self.inner(), |table| {
-      Ok(table.id.clone())
-    }).unwrap()
+  
+  fn get_sym_table(&self) -> Option<SymTableId> {
+    sym_tables_read(self.inner(), |sym_tables| {
+      sym_tables.id.clone()
+    }).ok()
   }
 
   /// Get all tables on the stack. 
   /// The first one is the global table, and the last one is the current table
   /// Therefore, the return length is at least one.
   fn all_sym_tables(&self) -> Vec<SymTableId> {
-    let my_table = self.sym_table_id();
-
-    let mut higher = if let Some(parent) = self.get_parent() {
-      parent.all_sym_tables()
-    } else {
-      vec![]
-    };
-
-    higher.extend(my_table);
-    higher
+    let mut tables = Vec::new();
+    let mut cur = Some(self.clone());
+    while let Some(node) = cur {
+      tables.extend(node.get_sym_table());
+      cur = node.get_parent();
+    } 
+    tables.reverse();
+    tables
   }
 
   fn last_level_sym_table(&self) -> SymTableId {
@@ -168,7 +167,7 @@ impl SymTableOwner for AstNodeId {
 
 pub type SemaRes = Result<(), String>;
 
-trait Semantics {
+pub trait Semantics {
   fn const_eval(&self) -> SemaRes;
   fn children_ty_sanify_check(&self) -> SemaRes;
   fn semantics_analyze(&self) -> SemaRes;
@@ -222,7 +221,7 @@ impl Semantics for AstNodeId {
         match c_init_val {
           ast::ConstInitVal::Single(sub_const_exp, _) => {
             let value_gathered = sub_const_exp.const_single_value();
-            ast_data_write_as!(self.inner(), ConstInitVal, |cur_data| {
+            ast_data_write_as!(self, ConstInitVal, |cur_data| {
               *cur_data.const_mut().unwrap() = value_gathered;
             });
           },
@@ -235,7 +234,7 @@ impl Semantics for AstNodeId {
         match init_val {
             ast::InitVal::Single(sub_exp, _) => {
               let value_gathered = sub_exp.const_single_value();
-              ast_data_write_as!(self.inner(), InitVal, |cur_data| {
+              ast_data_write_as!(self, InitVal, |cur_data| {
                 *cur_data.const_mut().unwrap() = value_gathered;
               });
             }
@@ -250,7 +249,7 @@ impl Semantics for AstNodeId {
       ast::AstData::Stmt(_) => { }
       ast::AstData::Exp(exp) => {
         let value_gathered = exp.l_or_exp.const_single_value();
-        ast_data_write_as!(self.inner(), Exp, |data| {
+        ast_data_write_as!(self, Exp, |data| {
           data.const_value = value_gathered
         });
       }
@@ -259,7 +258,7 @@ impl Semantics for AstNodeId {
         match exp {
           ast::PrimaryExp::Exp(sub_exp, _) => {
             let value_gathered = sub_exp.const_single_value();
-            ast_data_write_as!(self.inner(), PrimaryExp, |data| {
+            ast_data_write_as!(self, PrimaryExp, |data| {
               *data.const_mut().unwrap() = value_gathered;
             });
           }
@@ -271,7 +270,7 @@ impl Semantics for AstNodeId {
         match uexp {
           ast::UnaryExp::PrimaryExp { pexp, .. } => {
             let value_gathered = pexp.const_single_value();
-            ast_data_write_as!(self.inner(), UnaryExp, |data| {
+            ast_data_write_as!(self, UnaryExp, |data| {
               *data.const_mut().unwrap() = value_gathered;
             });
           }
@@ -283,7 +282,7 @@ impl Semantics for AstNodeId {
               None
             };
 
-            ast_data_write_as!(self.inner(), UnaryExp, |data| {
+            ast_data_write_as!(self, UnaryExp, |data| {
               *data.const_mut().unwrap() = value;
             });
           }
@@ -297,7 +296,7 @@ impl Semantics for AstNodeId {
           // evaluate: (unary | binary)
           ast::BinaryExp::Unary { exp: sub_exp, .. } => {
             let value = sub_exp.const_single_value();
-            ast_data_write_as!(self.inner(), BinaryExp, |data| {
+            ast_data_write_as!(self, BinaryExp, |data| {
               *data.const_mut() = value;
             });
           }
@@ -310,7 +309,7 @@ impl Semantics for AstNodeId {
               None
             };
 
-            ast_data_write_as!(self.inner(), BinaryExp, |data| {
+            ast_data_write_as!(self, BinaryExp, |data| {
               *data.const_mut() = value;
             });
           
@@ -319,7 +318,7 @@ impl Semantics for AstNodeId {
       }
       ast::AstData::ConstExp(const_exp) => {
         let value = const_exp.0.const_single_value();
-        ast_data_write_as!(self.inner(), ConstExp, |data| {
+        ast_data_write_as!(self, ConstExp, |data| {
           data.1 = value;
         });
       }

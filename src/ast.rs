@@ -1,3 +1,5 @@
+use std::fmt::{Display, Formatter};
+
 use crate::{define_wrapper, global_mapper, utils::dfs::TreeId};
 use uuid::Uuid;
 
@@ -27,12 +29,12 @@ macro_rules! ast_node_into {
   };
 }
 
-/// Convert a &AstNode into AstData::$variant
+/// Convert a AstNodeId into AstData::$variant
 #[macro_export]
 macro_rules! ast_into {
   ($node_id:expr, $variant:ident) => {
     ast_nodes_read(
-      $node_id,
+      $node_id.inner(),
       |node| {
         ast_node_into!(node, $variant).clone()
       },
@@ -44,7 +46,7 @@ macro_rules! ast_into {
 macro_rules! ast_data_read_as {
   ($node_id:expr, $variant:ident, |$data:ident| $closure:expr) => {
     ast_nodes_read(
-      $node_id,
+      $node_id.inner(),
       |node| {
         if let ast::AstData::$variant($data) = &node.ast {
           $closure
@@ -60,12 +62,12 @@ macro_rules! ast_data_read_as {
 macro_rules! ast_data_write_as {
   ($node_id:expr, $variant:ident, |$data:ident| $closure:expr) => {
     ast_nodes_write(
-      $node_id,
+      $node_id.inner(),
       |node| {
         if let ast::AstData::$variant($data) = &mut node.ast {
           $closure
         } else {
-          panic!("ast_data_read_as!() failed")
+          panic!("ast_data_write_as!() failed")
         }
       },
     ).unwrap()
@@ -134,7 +136,11 @@ impl AstNodeId {
 
 define_wrapper!(AstNodeId, Uuid);
 
-pub type AstBox = Box<AstNode>;
+impl std::fmt::Debug for AstNodeId {
+  fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+    write!(f, "[OMITTED]")
+  }
+}
 
 pub struct AstNode {
   pub id: AstNodeId, 
@@ -147,232 +153,6 @@ impl UuidOwner for AstNode {
     self.id.0
   }
 }
-
-impl AstNode {
-  /// Insert a node and set its children's parent
-  pub fn register(node: AstNode) -> AstNodeId {
-    let cur_id = node.id.clone();
-    AST_NODES.with_borrow_mut(|nodes| {
-      for child in node.ast.get_childrens() {
-        let mut child = nodes.borrow_mut(&child.into()).unwrap();
-        child.parent = Some(cur_id.clone());
-      }
-    });
-    ast_nodes_register(node);
-    cur_id
-  }
-
-  pub fn new(ast: AstData) -> AstNode {
-    let cur_id = Uuid::new_v4();
-    AstNode {
-      id: cur_id.into(),
-      ast,
-      parent: None,
-    }
-  }
-
-  pub fn new_comp_unit(items: Vec<AstNodeId>) -> AstNodeId {
-    let ast = AstData::CompUnit(CompUnit{items});
-    AstNode::register(AstNode::new(ast))
-  }
-
-  pub fn new_decl_const_decl(const_decl: AstNodeId) -> AstNodeId {
-    let ast = AstData::Decl(Decl::ConstDecl(const_decl));
-    AstNode::register(AstNode::new(ast))
-  }
-
-  pub fn new_decl_var_decl(var_decl: AstNodeId) -> AstNodeId {
-    let ast = AstData::Decl(Decl::VarDecl(var_decl));
-    AstNode::register(AstNode::new(ast))
-  }
-
-  pub fn new_const_decl(btype: AstNodeId, const_defs: Vec<AstNodeId>) -> AstNodeId {
-    let ast = AstData::ConstDecl(ConstDecl{btype, const_defs});
-    AstNode::register(AstNode::new(ast))
-  }
-
-  pub fn new_const_def(ident: String, idx: Vec<AstNodeId>, const_init_val: AstNodeId) -> AstNodeId {
-    let ast = AstData::ConstDef(ConstDef{ident, idx, const_init_val});
-    AstNode::register(AstNode::new(ast))
-  }
-
-  pub fn new_const_init_val_single(exp: AstNodeId) -> AstNodeId {
-    let ast = AstData::ConstInitVal(ConstInitVal::Single(exp, None));
-    AstNode::register(AstNode::new(ast))
-  }
-
-  pub fn new_const_init_val_sequence(exps: Vec<AstNodeId>) -> AstNodeId {
-    let ast = AstData::ConstInitVal(ConstInitVal::Sequence(exps));
-    AstNode::register(AstNode::new(ast))
-  }
-
-  pub fn new_val_decl(btype: AstNodeId, var_defs: Vec<AstNodeId>) -> AstNodeId {
-    let ast = AstData::VarDecl(VarDecl{btype, var_defs});
-    AstNode::register(AstNode::new(ast))
-  }
-
-  pub fn new_var_def(ident: String, idx: Vec<AstNodeId>, init_val: Option<AstNodeId>) -> AstNodeId {
-    let ast = AstData::VarDef(VarDef{ident, idx, init_val});
-    AstNode::register(AstNode::new(ast))
-  }
-
-  pub fn new_init_val_single(exp: AstNodeId) -> AstNodeId {
-    let ast = AstData::InitVal(InitVal::Single(exp, None));
-    AstNode::register(AstNode::new(ast))
-  }
-
-  pub fn new_init_val_sequence(init_vals: Vec<AstNodeId>) -> AstNodeId {
-    let ast = AstData::InitVal(InitVal::Sequence(init_vals));
-    AstNode::register(AstNode::new(ast))
-  }
-
-  pub fn new_func_def(has_retval: bool, ident: String, func_f_params: AstNodeId, block: AstNodeId) -> AstNodeId {
-    let ast = AstData::FuncDef(FuncDef{has_retval, ident, func_f_params, block});
-    AstNode::register(AstNode::new(ast))
-  }
-
-  pub fn new_func_f_params(params: Vec<AstNodeId>) -> AstNodeId {
-    let ast = AstData::FuncFParams(FuncFParams{params});
-    AstNode::register(AstNode::new(ast))
-  }
-
-  pub fn new_func_f_param(btype: AstNodeId, ident: String, idx: Option<Vec<AstNodeId>>) -> AstNodeId {
-    if let Some(idx) = idx {
-      let ast = AstData::FuncFParam(FuncFParam::Array{btype, ident, shape_no_first_dim: idx});
-      AstNode::register(AstNode::new(ast))
-    } else {
-      let ast = AstData::FuncFParam(FuncFParam::Single{btype, ident});
-      AstNode::register(AstNode::new(ast))
-    }
-  }
-
-  pub fn new_block(items: Vec<AstNodeId>) -> AstNodeId {
-    let ast = AstData::Block(Block{items});
-    AstNode::register(AstNode::new(ast))
-  }
-
-  pub fn new_block_item_decl(decl: AstNodeId) -> AstNodeId {
-    let ast = AstData::BlockItem(BlockItem::Decl(decl));
-    AstNode::register(AstNode::new(ast))
-  }
-
-  pub fn new_block_item_stmt(stmt: AstNodeId) -> AstNodeId {
-    let ast = AstData::BlockItem(BlockItem::Stmt(stmt));
-    AstNode::register(AstNode::new(ast))
-  }
-
-  pub fn new_stmt_assign(lval: AstNodeId, exp: AstNodeId) -> AstNodeId {
-    let ast = AstData::Stmt(Stmt::Assign(lval, exp));
-    AstNode::register(AstNode::new(ast))
-  }
-
-  pub fn new_stmt_exp(exp: Option<AstNodeId>) -> AstNodeId {
-    let ast = AstData::Stmt(Stmt::Exp(exp));
-    AstNode::register(AstNode::new(ast))
-  }
-
-  pub fn new_stmt_block(block: AstNodeId) -> AstNodeId {
-    let ast = AstData::Stmt(Stmt::Block(block));
-    AstNode::register(AstNode::new(ast))
-  }
-
-  pub fn new_stmt_if_else(expr: AstNodeId, branch1: AstNodeId, branch0: Option<AstNodeId>) -> AstNodeId {
-    let ast = AstData::Stmt(Stmt::IfElse{expr, branch1, branch0});
-    AstNode::register(AstNode::new(ast))
-  }
-
-  pub fn new_stmt_while(expr: AstNodeId, block: AstNodeId) -> AstNodeId {
-    let ast = AstData::Stmt(Stmt::While{expr, block});
-    AstNode::register(AstNode::new(ast))
-  }
-
-  pub fn new_stmt_break() -> AstNodeId {
-    let ast = AstData::Stmt(Stmt::Break);
-    AstNode::register(AstNode::new(ast))
-  }
-
-  pub fn new_stmt_continue() -> AstNodeId {
-    let ast = AstData::Stmt(Stmt::Continue);
-    AstNode::register(AstNode::new(ast))
-  }
-
-  pub fn new_stmt_return(exp: Option<AstNodeId>) -> AstNodeId {
-    let ast = AstData::Stmt(Stmt::Return(exp));
-    AstNode::register(AstNode::new(ast))
-  }
-
-  pub fn new_exp(l_or_exp: AstNodeId) -> AstNodeId {
-    let ast = AstData::Exp(Exp{l_or_exp, const_value: None});
-    AstNode::register(AstNode::new(ast))
-  }
-
-  pub fn new_lval(ident: String, idx: Vec<AstNodeId>) -> AstNodeId {
-    let ast = AstData::LVal(LVal{ident, idx});
-    AstNode::register(AstNode::new(ast))
-  }
-
-  pub fn new_primary_exp_exp(exp: AstNodeId) -> AstNodeId {
-    let ast = AstData::PrimaryExp(PrimaryExp::Exp(exp, None));
-    AstNode::register(AstNode::new(ast))
-  }
-
-  pub fn new_primary_exp_lval(lval: AstNodeId) -> AstNodeId {
-    let ast = AstData::PrimaryExp(PrimaryExp::LVal(lval));
-    AstNode::register(AstNode::new(ast))
-  }
-
-  pub fn new_primary_exp_number(num: i32) -> AstNodeId {
-    let ast = AstData::PrimaryExp(PrimaryExp::Number(num));
-    AstNode::register(AstNode::new(ast))
-  }
-
-  pub fn new_unary_exp_primary(pexp: AstNodeId) -> AstNodeId {
-    let ast = AstData::UnaryExp(UnaryExp::PrimaryExp{pexp, const_value: None});
-    AstNode::register(AstNode::new(ast))
-  }
-
-  pub fn new_unary_exp_call(ident: String, params: AstNodeId) -> AstNodeId {
-    let ast = AstData::UnaryExp(UnaryExp::Call{ident, params});
-    AstNode::register(AstNode::new(ast))
-  }
-
-  pub fn new_unary_exp_unary(op: UnaryOp, exp: AstNodeId) -> AstNodeId {
-    let ast = AstData::UnaryExp(UnaryExp::Unary{op, exp, const_value: None});
-    AstNode::register(AstNode::new(ast))
-  }
-
-  pub fn new_binary_exp_unary(exp: AstNodeId) -> AstNodeId {
-    let ast = AstData::BinaryExp(BinaryExp::Unary{exp, const_value: None});
-    AstNode::register(AstNode::new(ast))
-  }
-
-  pub fn new_binary_exp_binary(lhs: AstNodeId, op: BinaryOp, rhs: AstNodeId) -> AstNodeId {
-    let ast = AstData::BinaryExp(BinaryExp::Binary{lhs, op, rhs, const_value: None});
-    AstNode::register(AstNode::new(ast))
-  }
-
-  pub fn new_const_exp(exp: AstNodeId) -> AstNodeId {
-    let ast = AstData::ConstExp(ConstExp(exp, None));
-    AstNode::register(AstNode::new(ast))
-  }
-
-  pub fn new_binary_exp(lhs: AstNodeId, op: BinaryOp, rhs: AstNodeId) -> AstNodeId {
-    let ast = AstData::BinaryExp(BinaryExp::Binary{lhs, op, rhs, const_value: None});
-    AstNode::register(AstNode::new(ast))
-  }
-
-  pub fn new_func_r_params(params: Vec<AstNodeId>) -> AstNodeId {
-    let ast = AstData::FuncRParams(FuncRParams{params});
-    AstNode::register(AstNode::new(ast))
-  }
-
-  pub fn new_btype() -> AstNodeId {
-    let ast = AstData::BType;
-    AstNode::register(AstNode::new(ast))
-  }
-  
-}
-
 
 
 #[derive(Debug, Clone)]
@@ -412,73 +192,6 @@ pub enum AstData {
   ConstExp(ConstExp),
 }
 
-impl AstData {
-  pub fn get_childrens(&self) -> Vec<AstNodeId> {
-    match self {
-      AstData::CompUnit(CompUnit{items}) => items.clone(),
-      AstData::Decl(Decl::ConstDecl(const_decl)) => vec![const_decl.clone()],
-      AstData::Decl(Decl::VarDecl(var_decl)) => vec![var_decl.clone()],
-      AstData::ConstDecl(ConstDecl{const_defs, ..}) => const_defs.clone(),
-      AstData::ConstDef(ConstDef{idx, const_init_val, ..}) => {
-        let mut res = idx.clone();
-        res.push(const_init_val.clone());
-        res
-      },
-      AstData::ConstInitVal(ConstInitVal::Single(exp, ..)) => vec![exp.clone()],
-      AstData::ConstInitVal(ConstInitVal::Sequence(exps)) => exps.clone(),
-      AstData::VarDecl(VarDecl{var_defs, ..}) => var_defs.clone(),
-      AstData::VarDef(VarDef{idx, init_val, ..}) => {
-        let mut res = idx.clone();
-        if let Some(init_val) = init_val {
-          res.push(init_val.clone());
-        }
-        res
-      },
-      AstData::InitVal(InitVal::Single(exp, _)) => vec![exp.clone()],
-      AstData::InitVal(InitVal::Sequence(init_vals)) => init_vals.clone(),
-      AstData::FuncDef(FuncDef{func_f_params, block, ..}) => vec![func_f_params.clone(), block.clone()],
-      AstData::FuncFParams(FuncFParams{params}) => params.clone(),
-      AstData::FuncFParam(FuncFParam::Single{btype, ..}) => vec![btype.clone()],
-      AstData::FuncFParam(FuncFParam::Array{btype, shape_no_first_dim, ..}) => {
-        let mut res = shape_no_first_dim.clone();
-        res.push(btype.clone());
-        res
-      },
-      AstData::Block(Block{items}) => items.clone(),
-      AstData::BlockItem(BlockItem::Decl(decl)) => vec![decl.clone()],
-      AstData::BlockItem(BlockItem::Stmt(stmt)) => vec![stmt.clone()],
-      AstData::Stmt(Stmt::Assign(lval, exp)) => vec![lval.clone(), exp.clone()],
-      AstData::Stmt(Stmt::Exp(Some(exp))) => vec![exp.clone()],
-      AstData::Stmt(Stmt::Exp(None)) => vec![],
-      AstData::Stmt(Stmt::Block(block)) => vec![block.clone()],
-      AstData::Stmt(Stmt::IfElse{expr, branch1, branch0}) => {
-        let mut res = vec![expr.clone(), branch1.clone()];
-        if let Some(branch0) = branch0 {
-          res.push(branch0.clone());
-        }
-        res
-      },
-      AstData::Stmt(Stmt::While{expr, block}) => vec![expr.clone(), block.clone()],
-      AstData::Stmt(Stmt::Return(Some(exp))) => vec![exp.clone()],
-      AstData::Stmt(Stmt::Return(None)) => vec![],
-      AstData::Stmt(Stmt::Break) => vec![],
-      AstData::Stmt(Stmt::Continue) => vec![],
-      AstData::Exp(Exp{l_or_exp, ..}) => vec![l_or_exp.clone()],
-      AstData::LVal(LVal{idx, ..}) => idx.clone(),
-      AstData::UnaryExp(UnaryExp::PrimaryExp{pexp, ..}) => vec![pexp.clone()],
-      AstData::UnaryExp(UnaryExp::Call{params, ..}) => vec![params.clone()],
-      AstData::UnaryExp(UnaryExp::Unary{exp, ..}) => vec![exp.clone()],
-      AstData::BinaryExp(BinaryExp::Binary{lhs, rhs, ..}) => vec![lhs.clone(), rhs.clone()],
-      AstData::BinaryExp(BinaryExp::Unary{exp, ..}) => vec![exp.clone()],
-      AstData::ConstExp(ConstExp(exp, ..)) => vec![exp.clone()],
-      AstData::BType => vec![],
-      AstData::PrimaryExp(PrimaryExp::Exp(uuid, ..)) => vec![uuid.clone()],
-      AstData::PrimaryExp(PrimaryExp::LVal(uuid, ..)) => vec![uuid.clone()],
-      AstData::PrimaryExp(PrimaryExp::Number(_)) => vec![],
-      AstData::FuncRParams(FuncRParams{params}) => params.clone()
-    }
-  }
-}
 
 #[derive(Debug, Clone)]
 pub struct CompUnit {
@@ -907,5 +620,303 @@ impl AstNodeId {
       );
     visitor.dfs(self).unwrap();
     res.take()
+  }
+}
+
+
+
+impl AstNode {
+  /// Insert a node and set its children's parent
+  pub fn register(node: AstNode) -> AstNodeId {
+    let cur_id = node.id.clone();
+    AST_NODES.with_borrow_mut(|nodes| {
+      for child in node.ast.get_childrens() {
+        let mut child = nodes.borrow_mut(&child.into()).unwrap();
+        child.parent = Some(cur_id.clone());
+      }
+    });
+    ast_nodes_register(node);
+    cur_id
+  }
+
+  pub fn new(ast: AstData) -> AstNode {
+    let cur_id = Uuid::new_v4();
+    AstNode {
+      id: cur_id.into(),
+      ast,
+      parent: None,
+    }
+  }
+
+  pub fn new_comp_unit(items: Vec<AstNodeId>) -> AstNodeId {
+    let ast = AstData::CompUnit(CompUnit{items});
+    AstNode::register(AstNode::new(ast))
+  }
+
+  pub fn new_decl_const_decl(const_decl: AstNodeId) -> AstNodeId {
+    let ast = AstData::Decl(Decl::ConstDecl(const_decl));
+    AstNode::register(AstNode::new(ast))
+  }
+
+  pub fn new_decl_var_decl(var_decl: AstNodeId) -> AstNodeId {
+    let ast = AstData::Decl(Decl::VarDecl(var_decl));
+    AstNode::register(AstNode::new(ast))
+  }
+
+  pub fn new_const_decl(btype: AstNodeId, const_defs: Vec<AstNodeId>) -> AstNodeId {
+    let ast = AstData::ConstDecl(ConstDecl{btype, const_defs});
+    AstNode::register(AstNode::new(ast))
+  }
+
+  pub fn new_const_def(ident: String, idx: Vec<AstNodeId>, const_init_val: AstNodeId) -> AstNodeId {
+    let ast = AstData::ConstDef(ConstDef{ident, idx, const_init_val});
+    AstNode::register(AstNode::new(ast))
+  }
+
+  pub fn new_const_init_val_single(exp: AstNodeId) -> AstNodeId {
+    let ast = AstData::ConstInitVal(ConstInitVal::Single(exp, None));
+    AstNode::register(AstNode::new(ast))
+  }
+
+  pub fn new_const_init_val_sequence(exps: Vec<AstNodeId>) -> AstNodeId {
+    let ast = AstData::ConstInitVal(ConstInitVal::Sequence(exps));
+    AstNode::register(AstNode::new(ast))
+  }
+
+  pub fn new_val_decl(btype: AstNodeId, var_defs: Vec<AstNodeId>) -> AstNodeId {
+    let ast = AstData::VarDecl(VarDecl{btype, var_defs});
+    AstNode::register(AstNode::new(ast))
+  }
+
+  pub fn new_var_def(ident: String, idx: Vec<AstNodeId>, init_val: Option<AstNodeId>) -> AstNodeId {
+    let ast = AstData::VarDef(VarDef{ident, idx, init_val});
+    AstNode::register(AstNode::new(ast))
+  }
+
+  pub fn new_init_val_single(exp: AstNodeId) -> AstNodeId {
+    let ast = AstData::InitVal(InitVal::Single(exp, None));
+    AstNode::register(AstNode::new(ast))
+  }
+
+  pub fn new_init_val_sequence(init_vals: Vec<AstNodeId>) -> AstNodeId {
+    let ast = AstData::InitVal(InitVal::Sequence(init_vals));
+    AstNode::register(AstNode::new(ast))
+  }
+
+  pub fn new_func_def(has_retval: bool, ident: String, func_f_params: AstNodeId, block: AstNodeId) -> AstNodeId {
+    let ast = AstData::FuncDef(FuncDef{has_retval, ident, func_f_params, block});
+    AstNode::register(AstNode::new(ast))
+  }
+
+  pub fn new_func_f_params(params: Vec<AstNodeId>) -> AstNodeId {
+    let ast = AstData::FuncFParams(FuncFParams{params});
+    AstNode::register(AstNode::new(ast))
+  }
+
+  pub fn new_func_f_param(btype: AstNodeId, ident: String, idx: Option<Vec<AstNodeId>>) -> AstNodeId {
+    if let Some(idx) = idx {
+      let ast = AstData::FuncFParam(FuncFParam::Array{btype, ident, shape_no_first_dim: idx});
+      AstNode::register(AstNode::new(ast))
+    } else {
+      let ast = AstData::FuncFParam(FuncFParam::Single{btype, ident});
+      AstNode::register(AstNode::new(ast))
+    }
+  }
+
+  pub fn new_block(items: Vec<AstNodeId>) -> AstNodeId {
+    let ast = AstData::Block(Block{items});
+    AstNode::register(AstNode::new(ast))
+  }
+
+  pub fn new_block_item_decl(decl: AstNodeId) -> AstNodeId {
+    let ast = AstData::BlockItem(BlockItem::Decl(decl));
+    AstNode::register(AstNode::new(ast))
+  }
+
+  pub fn new_block_item_stmt(stmt: AstNodeId) -> AstNodeId {
+    let ast = AstData::BlockItem(BlockItem::Stmt(stmt));
+    AstNode::register(AstNode::new(ast))
+  }
+
+  pub fn new_stmt_assign(lval: AstNodeId, exp: AstNodeId) -> AstNodeId {
+    let ast = AstData::Stmt(Stmt::Assign(lval, exp));
+    AstNode::register(AstNode::new(ast))
+  }
+
+  pub fn new_stmt_exp(exp: Option<AstNodeId>) -> AstNodeId {
+    let ast = AstData::Stmt(Stmt::Exp(exp));
+    AstNode::register(AstNode::new(ast))
+  }
+
+  pub fn new_stmt_block(block: AstNodeId) -> AstNodeId {
+    let ast = AstData::Stmt(Stmt::Block(block));
+    AstNode::register(AstNode::new(ast))
+  }
+
+  pub fn new_stmt_if_else(expr: AstNodeId, branch1: AstNodeId, branch0: Option<AstNodeId>) -> AstNodeId {
+    let ast = AstData::Stmt(Stmt::IfElse{expr, branch1, branch0});
+    AstNode::register(AstNode::new(ast))
+  }
+
+  pub fn new_stmt_while(expr: AstNodeId, block: AstNodeId) -> AstNodeId {
+    let ast = AstData::Stmt(Stmt::While{expr, block});
+    AstNode::register(AstNode::new(ast))
+  }
+
+  pub fn new_stmt_break() -> AstNodeId {
+    let ast = AstData::Stmt(Stmt::Break);
+    AstNode::register(AstNode::new(ast))
+  }
+
+  pub fn new_stmt_continue() -> AstNodeId {
+    let ast = AstData::Stmt(Stmt::Continue);
+    AstNode::register(AstNode::new(ast))
+  }
+
+  pub fn new_stmt_return(exp: Option<AstNodeId>) -> AstNodeId {
+    let ast = AstData::Stmt(Stmt::Return(exp));
+    AstNode::register(AstNode::new(ast))
+  }
+
+  pub fn new_exp(l_or_exp: AstNodeId) -> AstNodeId {
+    let ast = AstData::Exp(Exp{l_or_exp, const_value: None});
+    AstNode::register(AstNode::new(ast))
+  }
+
+  pub fn new_lval(ident: String, idx: Vec<AstNodeId>) -> AstNodeId {
+    let ast = AstData::LVal(LVal{ident, idx});
+    AstNode::register(AstNode::new(ast))
+  }
+
+  pub fn new_primary_exp_exp(exp: AstNodeId) -> AstNodeId {
+    let ast = AstData::PrimaryExp(PrimaryExp::Exp(exp, None));
+    AstNode::register(AstNode::new(ast))
+  }
+
+  pub fn new_primary_exp_lval(lval: AstNodeId) -> AstNodeId {
+    let ast = AstData::PrimaryExp(PrimaryExp::LVal(lval));
+    AstNode::register(AstNode::new(ast))
+  }
+
+  pub fn new_primary_exp_number(num: i32) -> AstNodeId {
+    let ast = AstData::PrimaryExp(PrimaryExp::Number(num));
+    AstNode::register(AstNode::new(ast))
+  }
+
+  pub fn new_unary_exp_primary(pexp: AstNodeId) -> AstNodeId {
+    let ast = AstData::UnaryExp(UnaryExp::PrimaryExp{pexp, const_value: None});
+    AstNode::register(AstNode::new(ast))
+  }
+
+  pub fn new_unary_exp_call(ident: String, params: AstNodeId) -> AstNodeId {
+    let ast = AstData::UnaryExp(UnaryExp::Call{ident, params});
+    AstNode::register(AstNode::new(ast))
+  }
+
+  pub fn new_unary_exp_unary(op: UnaryOp, exp: AstNodeId) -> AstNodeId {
+    let ast = AstData::UnaryExp(UnaryExp::Unary{op, exp, const_value: None});
+    AstNode::register(AstNode::new(ast))
+  }
+
+  pub fn new_binary_exp_unary(exp: AstNodeId) -> AstNodeId {
+    let ast = AstData::BinaryExp(BinaryExp::Unary{exp, const_value: None});
+    AstNode::register(AstNode::new(ast))
+  }
+
+  pub fn new_binary_exp_binary(lhs: AstNodeId, op: BinaryOp, rhs: AstNodeId) -> AstNodeId {
+    let ast = AstData::BinaryExp(BinaryExp::Binary{lhs, op, rhs, const_value: None});
+    AstNode::register(AstNode::new(ast))
+  }
+
+  pub fn new_const_exp(exp: AstNodeId) -> AstNodeId {
+    let ast = AstData::ConstExp(ConstExp(exp, None));
+    AstNode::register(AstNode::new(ast))
+  }
+
+  pub fn new_binary_exp(lhs: AstNodeId, op: BinaryOp, rhs: AstNodeId) -> AstNodeId {
+    let ast = AstData::BinaryExp(BinaryExp::Binary{lhs, op, rhs, const_value: None});
+    AstNode::register(AstNode::new(ast))
+  }
+
+  pub fn new_func_r_params(params: Vec<AstNodeId>) -> AstNodeId {
+    let ast = AstData::FuncRParams(FuncRParams{params});
+    AstNode::register(AstNode::new(ast))
+  }
+
+  pub fn new_btype() -> AstNodeId {
+    let ast = AstData::BType;
+    AstNode::register(AstNode::new(ast))
+  }
+  
+}
+
+
+
+
+impl AstData {
+  pub fn get_childrens(&self) -> Vec<AstNodeId> {
+    match self {
+      AstData::CompUnit(CompUnit{items}) => items.clone(),
+      AstData::Decl(Decl::ConstDecl(const_decl)) => vec![const_decl.clone()],
+      AstData::Decl(Decl::VarDecl(var_decl)) => vec![var_decl.clone()],
+      AstData::ConstDecl(ConstDecl{const_defs, ..}) => const_defs.clone(),
+      AstData::ConstDef(ConstDef{idx, const_init_val, ..}) => {
+        let mut res = idx.clone();
+        res.push(const_init_val.clone());
+        res
+      },
+      AstData::ConstInitVal(ConstInitVal::Single(exp, ..)) => vec![exp.clone()],
+      AstData::ConstInitVal(ConstInitVal::Sequence(exps)) => exps.clone(),
+      AstData::VarDecl(VarDecl{var_defs, ..}) => var_defs.clone(),
+      AstData::VarDef(VarDef{idx, init_val, ..}) => {
+        let mut res = idx.clone();
+        if let Some(init_val) = init_val {
+          res.push(init_val.clone());
+        }
+        res
+      },
+      AstData::InitVal(InitVal::Single(exp, _)) => vec![exp.clone()],
+      AstData::InitVal(InitVal::Sequence(init_vals)) => init_vals.clone(),
+      AstData::FuncDef(FuncDef{func_f_params, block, ..}) => vec![func_f_params.clone(), block.clone()],
+      AstData::FuncFParams(FuncFParams{params}) => params.clone(),
+      AstData::FuncFParam(FuncFParam::Single{btype, ..}) => vec![btype.clone()],
+      AstData::FuncFParam(FuncFParam::Array{btype, shape_no_first_dim, ..}) => {
+        let mut res = shape_no_first_dim.clone();
+        res.push(btype.clone());
+        res
+      },
+      AstData::Block(Block{items}) => items.clone(),
+      AstData::BlockItem(BlockItem::Decl(decl)) => vec![decl.clone()],
+      AstData::BlockItem(BlockItem::Stmt(stmt)) => vec![stmt.clone()],
+      AstData::Stmt(Stmt::Assign(lval, exp)) => vec![lval.clone(), exp.clone()],
+      AstData::Stmt(Stmt::Exp(Some(exp))) => vec![exp.clone()],
+      AstData::Stmt(Stmt::Exp(None)) => vec![],
+      AstData::Stmt(Stmt::Block(block)) => vec![block.clone()],
+      AstData::Stmt(Stmt::IfElse{expr, branch1, branch0}) => {
+        let mut res = vec![expr.clone(), branch1.clone()];
+        if let Some(branch0) = branch0 {
+          res.push(branch0.clone());
+        }
+        res
+      },
+      AstData::Stmt(Stmt::While{expr, block}) => vec![expr.clone(), block.clone()],
+      AstData::Stmt(Stmt::Return(Some(exp))) => vec![exp.clone()],
+      AstData::Stmt(Stmt::Return(None)) => vec![],
+      AstData::Stmt(Stmt::Break) => vec![],
+      AstData::Stmt(Stmt::Continue) => vec![],
+      AstData::Exp(Exp{l_or_exp, ..}) => vec![l_or_exp.clone()],
+      AstData::LVal(LVal{idx, ..}) => idx.clone(),
+      AstData::UnaryExp(UnaryExp::PrimaryExp{pexp, ..}) => vec![pexp.clone()],
+      AstData::UnaryExp(UnaryExp::Call{params, ..}) => vec![params.clone()],
+      AstData::UnaryExp(UnaryExp::Unary{exp, ..}) => vec![exp.clone()],
+      AstData::BinaryExp(BinaryExp::Binary{lhs, rhs, ..}) => vec![lhs.clone(), rhs.clone()],
+      AstData::BinaryExp(BinaryExp::Unary{exp, ..}) => vec![exp.clone()],
+      AstData::ConstExp(ConstExp(exp, ..)) => vec![exp.clone()],
+      AstData::BType => vec![],
+      AstData::PrimaryExp(PrimaryExp::Exp(uuid, ..)) => vec![uuid.clone()],
+      AstData::PrimaryExp(PrimaryExp::LVal(uuid, ..)) => vec![uuid.clone()],
+      AstData::PrimaryExp(PrimaryExp::Number(_)) => vec![],
+      AstData::FuncRParams(FuncRParams{params}) => params.clone()
+    }
   }
 }
