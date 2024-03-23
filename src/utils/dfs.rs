@@ -1,28 +1,35 @@
 
-pub trait Dfs: TreeId {
-  fn pre_process(&self) -> Result<(), String> { Ok(()) }
-  fn call_down(&self) -> Result<(), String> {
-    for child in self.get_childrens() {
-      child.dfs()?;
-    }
-    Ok(())
-  }
-  fn post_process(&self) -> Result<(), String> { Ok(()) }
-
-  /// Basic implementation of dfs
-  /// pre_process() -> call_down() -> post_process
-  fn simple_dfs(&self) -> Result<(), String> {
-    self.pre_process()?;
-    self.call_down()?;
-    self.post_process()
-  }
-
-  fn dfs(&self) -> Result<(), String>;
+pub struct DfsVisitor<Fpre, Fpost, T: TreeId> {
+  pre_process: Fpre,
+  post_process: Fpost,
+  phantom: std::marker::PhantomData<T>,
 }
 
+impl<Fpre, Fpost, T> DfsVisitor<Fpre, Fpost, T> 
+where 
+  Fpre: Fn(&T) -> Result<(), String>,
+  Fpost: Fn(&T) -> Result<(), String>,
+  T: TreeId
+{
+  pub fn new(pre_process: Fpre, post_process: Fpost) -> Self {
+    Self {
+      pre_process,
+      post_process,
+      phantom: std::marker::PhantomData,
+    }
+  }
 
-/// This should be implemented on the id, instead of the node itself.
+  pub fn dfs(&self, node: &T) -> Result<(), String> {
+    (self.pre_process)(node)?;
+    for child in node.get_childrens() {
+      self.dfs(&child)?;
+    }
+    (self.post_process)(node)?;
+    Ok(())
+  }
+}
+
 pub trait TreeId: Sized {
-  fn get_parent(&self) -> Option<Self> {todo!()}
+  fn get_parent(&self) -> Option<Self> {unimplemented!()}
   fn get_childrens(&self) -> Vec<Self>;
 }
