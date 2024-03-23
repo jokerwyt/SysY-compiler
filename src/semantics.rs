@@ -189,7 +189,7 @@ pub trait Semantics {
 
 impl AstNodeId {
   fn should_own_sym_table(&self) -> bool {
-    let ast_data = ast::get_ast_data(self);
+    let ast_data = self.get_ast_data();
     match ast_data {
         ast::AstData::CompUnit(_) => true, // the global sym table
         ast::AstData::FuncDef(_) => true, // stores all formal parameters
@@ -228,14 +228,15 @@ impl Semantics for AstNodeId {
     self.const_eval()
   }
 
+  /// Eval all compile-time constant single value.
+  /// Called in [Semantics::ty_irrelevant_postprocess]
   fn const_eval(&self) -> SemaRes {
-    let ast_data = ast::get_ast_data(self);
+    let ast_data = self.get_ast_data();
     match ast_data {
-      ast::AstData::CompUnit(_) => todo!(),
-      ast::AstData::Decl(_) => todo!(),
-      ast::AstData::ConstDecl(_) => todo!(),
-      ast::AstData::BType => todo!(),
-      ast::AstData::ConstIdxList(_) => todo!(),
+      ast::AstData::CompUnit(_) => { }
+      ast::AstData::Decl(_) => { }
+      ast::AstData::ConstDecl(_) => { }
+      ast::AstData::BType => { }
       ast::AstData::ConstDef(_) => todo!(),
       ast::AstData::ConstInitVal(_) => todo!(),
       ast::AstData::VarDecl(_) => todo!(),
@@ -255,17 +256,17 @@ impl Semantics for AstNodeId {
       ast::AstData::BinaryExp(_) => todo!(),
       ast::AstData::ConstExp(_) => todo!(),
     }
+    Ok(())
   }
 
   /// Check if the children of the node have the correct type.
   fn children_ty_sanify_check(&self) -> SemaRes {
-    let ast_data = ast::get_ast_data(self);
+    let ast_data = self.get_ast_data();
     match ast_data {
       ast::AstData::CompUnit(_) => todo!(),
       ast::AstData::Decl(_) => todo!(),
       ast::AstData::ConstDecl(_) => todo!(),
       ast::AstData::BType => todo!(),
-      ast::AstData::ConstIdxList(_) => todo!(),
       ast::AstData::ConstDef(_) => todo!(),
       ast::AstData::ConstInitVal(_) => todo!(),
       ast::AstData::VarDecl(_) => todo!(),
@@ -290,13 +291,12 @@ impl Semantics for AstNodeId {
   /// Preprocess the node before the children are processed.
   /// Specific to the node type.
   fn ty_specific_preprocess(&self) -> SemaRes {
-    let ast_data = ast::get_ast_data(self);
+    let ast_data = self.get_ast_data();
     match ast_data {
       ast::AstData::CompUnit(_) => { }, 
       ast::AstData::Decl(_) => { }, 
       ast::AstData::ConstDecl(_) => { }, 
       ast::AstData::BType => { }, 
-      ast::AstData::ConstIdxList(_) => { },
       ast::AstData::ConstDef(_) => { }, 
       ast::AstData::ConstInitVal(_) => { }, 
       ast::AstData::VarDecl(_) => { }, 
@@ -346,13 +346,12 @@ impl Semantics for AstNodeId {
   /// Postprocess the node before the children are processed.
   /// Specific to the node type.
   fn ty_specific_postprocess(&self) -> SemaRes {
-    let ast_data = ast::get_ast_data(self);
+    let ast_data = self.get_ast_data();
     match ast_data {
       ast::AstData::CompUnit(_) => { }
       ast::AstData::Decl(_) => { }
       ast::AstData::ConstDecl(_) => { }
       ast::AstData::BType => { }
-      ast::AstData::ConstIdxList(_) => { }
       ast::AstData::ConstDef(const_def) => {
         // Add the const to the symbol table
         let entry = SymTableEntry {

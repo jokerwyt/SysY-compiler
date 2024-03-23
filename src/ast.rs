@@ -1,5 +1,3 @@
-use std::ops::Deref;
-
 use crate::{define_wrapper, global_mapper, utils::dfs::TreeId};
 use uuid::Uuid;
 
@@ -19,29 +17,29 @@ macro_rules! ast_is {
 
 global_mapper!(AST_NODES, ast_nodes_submit, ast_nodes_register, AstNode);
 
-
-/// get const_value: Option<i32> from a AstNodeId.
-/// 
-/// # Panic
-/// Panic if the AstNodeId does not exist.
-pub fn get_const_value(node: AstNodeId) -> Option<i32> {
-  ast_nodes_submit(&node.into(), |node| {
-    if let AstData::Exp(Exp{const_value, .. }) = &node.ast {
-      *const_value
-    } else {
-      None
+impl AstNodeId {
+  /// # Panic
+  /// Panic if the AstNodeId does not exist.
+  pub fn get_ast_data(&self) -> AstData {
+    ast_nodes_submit(self.inner(), |node| {
+      node.ast.clone()
+    }).unwrap()
+  }
+  
+  pub fn const_single_value(&self) -> i32 {
+    match self.get_ast_data() {
+        AstData::ConstInitVal(_) => todo!(),
+        AstData::InitVal(_) => todo!(),
+        AstData::Exp(_) => todo!(),
+        AstData::LVal(_) => todo!(),
+        AstData::PrimaryExp(_) => todo!(),
+        AstData::UnaryExp(_) => todo!(),
+        AstData::FuncRParams(_) => todo!(),
+        AstData::BinaryExp(_) => todo!(),
+        AstData::ConstExp(_) => todo!(),
+        _ => panic!("There is no const single value slot in this node")
     }
-  }).unwrap()
-}
-
-/// get AstData
-/// 
-/// # Panic
-/// Panic if the AstNodeId does not exist.
-pub fn get_ast_data(node: &AstNodeId) -> AstData {
-  ast_nodes_submit(&node.0, |node| {
-    node.ast.clone()
-  }).unwrap()
+  }
 }
 
 define_wrapper!(AstNodeId, Uuid);
@@ -103,18 +101,13 @@ impl AstNode {
     AstNode::register(AstNode::new(ast))
   }
 
-  pub fn new_const_idx_list(const_exps: Vec<AstNodeId>) -> AstNodeId {
-    let ast = AstData::ConstIdxList(ConstIdxList{const_exps, eval_out: None});
-    AstNode::register(AstNode::new(ast))
-  }
-
-  pub fn new_const_def(ident: String, idx: AstNodeId, const_init_val: AstNodeId) -> AstNodeId {
+  pub fn new_const_def(ident: String, idx: Vec<AstNodeId>, const_init_val: AstNodeId) -> AstNodeId {
     let ast = AstData::ConstDef(ConstDef{ident, idx, const_init_val});
     AstNode::register(AstNode::new(ast))
   }
 
   pub fn new_const_init_val_single(exp: AstNodeId) -> AstNodeId {
-    let ast = AstData::ConstInitVal(ConstInitVal::Single(exp));
+    let ast = AstData::ConstInitVal(ConstInitVal::Single(exp, None));
     AstNode::register(AstNode::new(ast))
   }
 
@@ -128,7 +121,7 @@ impl AstNode {
     AstNode::register(AstNode::new(ast))
   }
 
-  pub fn new_var_def(ident: String, idx: AstNodeId, init_val: Option<AstNodeId>) -> AstNodeId {
+  pub fn new_var_def(ident: String, idx: Vec<AstNodeId>, init_val: Option<AstNodeId>) -> AstNodeId {
     let ast = AstData::VarDef(VarDef{ident, idx, init_val});
     AstNode::register(AstNode::new(ast))
   }
@@ -153,9 +146,9 @@ impl AstNode {
     AstNode::register(AstNode::new(ast))
   }
 
-  pub fn new_func_f_param(btype: AstNodeId, ident: String, idx: Option<AstNodeId>) -> AstNodeId {
+  pub fn new_func_f_param(btype: AstNodeId, ident: String, idx: Option<Vec<AstNodeId>>) -> AstNodeId {
     if let Some(idx) = idx {
-      let ast = AstData::FuncFParam(FuncFParam::Array{btype, ident, shape_no_first_dim: vec![idx]});
+      let ast = AstData::FuncFParam(FuncFParam::Array{btype, ident, shape_no_first_dim: idx});
       AstNode::register(AstNode::new(ast))
     } else {
       let ast = AstData::FuncFParam(FuncFParam::Single{btype, ident});
@@ -229,7 +222,7 @@ impl AstNode {
   }
 
   pub fn new_primary_exp_exp(exp: AstNodeId) -> AstNodeId {
-    let ast = AstData::PrimaryExp(PrimaryExp::Exp(exp));
+    let ast = AstData::PrimaryExp(PrimaryExp::Exp(exp, None));
     AstNode::register(AstNode::new(ast))
   }
 
@@ -269,7 +262,7 @@ impl AstNode {
   }
 
   pub fn new_const_exp(exp: AstNodeId) -> AstNodeId {
-    let ast = AstData::ConstExp(ConstExp(exp));
+    let ast = AstData::ConstExp(ConstExp(exp, 0));
     AstNode::register(AstNode::new(ast))
   }
 
@@ -298,7 +291,6 @@ pub enum AstData {
   Decl(Decl),
   ConstDecl(ConstDecl),
   BType,
-  ConstIdxList(ConstIdxList),
   ConstDef(ConstDef), 
   ConstInitVal(ConstInitVal),
   VarDecl(VarDecl),
@@ -337,13 +329,16 @@ impl AstData {
       AstData::Decl(Decl::ConstDecl(const_decl)) => vec![const_decl.clone()],
       AstData::Decl(Decl::VarDecl(var_decl)) => vec![var_decl.clone()],
       AstData::ConstDecl(ConstDecl{const_defs, ..}) => const_defs.clone(),
-      AstData::ConstIdxList(ConstIdxList{const_exps, ..}) => const_exps.clone(),
-      AstData::ConstDef(ConstDef{idx, const_init_val, ..}) => vec![idx.clone(), const_init_val.clone()],
-      AstData::ConstInitVal(ConstInitVal::Single(exp)) => vec![exp.clone()],
+      AstData::ConstDef(ConstDef{idx, const_init_val, ..}) => {
+        let mut res = idx.clone();
+        res.push(const_init_val.clone());
+        res
+      },
+      AstData::ConstInitVal(ConstInitVal::Single(exp, ..)) => vec![exp.clone()],
       AstData::ConstInitVal(ConstInitVal::Sequence(exps)) => exps.clone(),
       AstData::VarDecl(VarDecl{var_defs, ..}) => var_defs.clone(),
       AstData::VarDef(VarDef{idx, init_val, ..}) => {
-        let mut res = vec![idx.clone()];
+        let mut res = idx.clone();
         if let Some(init_val) = init_val {
           res.push(init_val.clone());
         }
@@ -385,7 +380,7 @@ impl AstData {
       AstData::UnaryExp(UnaryExp::Unary{exp, ..}) => vec![exp.clone()],
       AstData::BinaryExp(BinaryExp::Binary{lhs, rhs, ..}) => vec![lhs.clone(), rhs.clone()],
       AstData::BinaryExp(BinaryExp::Unary{exp, ..}) => vec![exp.clone()],
-      AstData::ConstExp(ConstExp(exp)) => vec![exp.clone()],
+      AstData::ConstExp(ConstExp(exp, ..)) => vec![exp.clone()],
       AstData::BType => vec![],
       AstData::PrimaryExp(PrimaryExp::Exp(uuid, ..)) => vec![uuid.clone()],
       AstData::PrimaryExp(PrimaryExp::LVal(uuid, ..)) => vec![uuid.clone()],
@@ -428,27 +423,22 @@ pub struct ConstIdxList {
 #[derive(Clone)]
 pub struct ConstDef {
   pub ident: String,
-  /// [AstData::ConstIdxList]
-  pub idx: AstNodeId,
+  /// [AstData::ConstExp]
+  pub idx: Vec<AstNodeId>,
   /// [AstData::ConstInitVal]
   pub const_init_val: AstNodeId
 }
 
 impl ConstDef {
   pub fn is_array(&self) -> bool {
-    match &get_ast_data(&self.idx) {
-        AstData::ConstIdxList(idx) => {
-          return idx.const_exps.len() > 0;
-        }
-        _ => panic!("ConstDef::idx should be ConstIdxList")
-    }
+    self.idx.len() > 0
   }
 }
 
 #[derive(Clone)]
 pub enum ConstInitVal {
   /// Contains an [AstData::ConstExp]
-  Single(AstNodeId),
+  Single(AstNodeId, Option<i32>),
   /// Contains many [AstData::ConstInitVal]
   Sequence(Vec<AstNodeId>)
 }
@@ -465,20 +455,15 @@ pub struct VarDecl {
 #[derive(Clone)]
 pub struct VarDef {
   pub ident: String,
-  /// [AstData::ConstIdxList]
-  pub idx: AstNodeId, 
+  /// [AstData::ConstExp]
+  pub idx: Vec<AstNodeId>, 
   /// [AstData::InitVal]
   pub init_val: Option<AstNodeId>
 }
 
 impl VarDef {
   pub fn is_array(&self) -> bool {
-    match &get_ast_data(&self.idx) {
-        AstData::ConstIdxList(idx) => {
-          return idx.const_exps.len() > 0;
-        }
-        _ => panic!("VarDef::idx should be ConstIdxList")
-    }
+    self.idx.len() > 0
   }
 
   pub fn has_init_val(&self) -> bool {
@@ -527,7 +512,7 @@ pub enum FuncFParam {
     btype: AstNodeId,
     ident: String,
 
-    /// [AstData::ConstIdxList]
+    /// [AstData::ConstExp]
     /// A formal parameter array will omit the first dim
     shape_no_first_dim: Vec<AstNodeId>,
   }
@@ -602,7 +587,7 @@ pub struct LVal {
 #[derive(Clone)]
 pub enum PrimaryExp {
   /// Contains an [AstData::Exp]
-  Exp(AstNodeId),
+  Exp(AstNodeId, Option<i32>),
   /// Contains an [AstData::LVal]
   LVal(AstNodeId),
   Number(i32),
@@ -735,7 +720,7 @@ impl BinaryOp {
 
 #[derive(Clone)]
 /// Contains an [AstData::Exp]
-pub struct ConstExp(pub AstNodeId);
+pub struct ConstExp(pub AstNodeId, pub i32);
 
 impl TreeId for AstNodeId {
   /// get parent AstNodeId
@@ -753,6 +738,6 @@ impl TreeId for AstNodeId {
   /// # Panic
   /// Panic if the AstNodeId does not exist.
   fn get_childrens(&self) -> Vec<AstNodeId> {
-    get_ast_data(self).get_childrens()
+    self.get_ast_data().get_childrens()
   }
 }

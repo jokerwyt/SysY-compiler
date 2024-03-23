@@ -104,9 +104,8 @@ _ConstDecl: AstNodeId = {
     => AstNode::new_const_decl(<>)
 };
 
-_ConstIdxList: AstNodeId = {
-  <("[" <_ConstExp> "]")*> 
-    => AstNode::new_const_idx_list(<>)
+_ConstIdxList: Vec<AstNodeId> = {
+  <("[" <_ConstExp> "]")*> => <>
 };
 
 _BType: AstNodeId = {
