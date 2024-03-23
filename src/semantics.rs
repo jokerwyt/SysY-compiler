@@ -8,9 +8,9 @@ use uuid::Uuid;
 
 use crate::utils::dfs::{DfsVisitor, TreeId};
 use crate::{ast, ast_is, ast::ast_nodes_read, ast::ast_nodes_write};
-use crate::ast::AstNodeId;
+use crate::ast::{AstNodeId, BinaryOp, UnaryOp};
 use crate::utils::uuid_mapper::UuidOwner;
-use crate::{ast_into, ast_node_into, define_wrapper, global_mapper};
+use crate::{ast_into, ast_node_into, ast_data_write_as, define_wrapper, global_mapper};
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 
@@ -168,17 +168,12 @@ impl SymTableOwner for AstNodeId {
 
 pub type SemaRes = Result<(), String>;
 
-pub trait Semantics {
+trait Semantics {
   fn const_eval(&self) -> SemaRes;
   fn children_ty_sanify_check(&self) -> SemaRes;
-
   fn semantics_analyze(&self) -> SemaRes;
-
-  fn ty_irrelevant_preprocess(&self) -> SemaRes;
-  fn ty_specific_preprocess(&self) -> SemaRes;
-  fn ty_irrelevant_postprocess(&self) -> SemaRes;
-  fn ty_specific_postprocess(&self) -> SemaRes;
-
+  fn sema_preprocess(&self) -> SemaRes;
+  fn sema_postprocess(&self) -> SemaRes;
 }
 
 impl AstNodeId {
@@ -195,36 +190,27 @@ impl AstNodeId {
 
 impl Semantics for AstNodeId {
   fn semantics_analyze(&self) -> SemaRes {
-    assert!(ast_is!(self.inner(), CompUnit));
+    assert!(ast_is!(self, CompUnit));
     let visitor = DfsVisitor::<_, _, AstNodeId>::new(
       |node| {
-        node.ty_irrelevant_preprocess()?;
-        node.ty_specific_preprocess()
+        node.sema_preprocess()
       },
       |node| {
-        node.ty_irrelevant_postprocess()?;
-        node.ty_specific_postprocess()
+        node.sema_postprocess()
       }
     );
     visitor.dfs(self)?;
     Ok(())
   }
 
-  fn ty_irrelevant_preprocess(&self) -> SemaRes {
-    self.children_ty_sanify_check()?;
-    if self.should_own_sym_table() {
-      self.create_symbol_table();
-    }
-    Ok(())
-  }
-
-  fn ty_irrelevant_postprocess(&self) -> SemaRes {
-    self.const_eval()
-  }
-
   /// Eval all compile-time constant single value.
-  /// Called in [Semantics::ty_irrelevant_postprocess]
+  /// Called in [Semantics::ty_irrelevant_sema_postprocess]
   fn const_eval(&self) -> SemaRes {
+    // implement logics:
+    // 1. check if the current node has a constant slot by multiple match
+    // 2. if yes, get value_gathered from the children
+    // 3. submit a write to cur_data
+
     let ast_data = self.get_ast_data();
     match ast_data {
       ast::AstData::CompUnit(_) => { }
@@ -234,11 +220,11 @@ impl Semantics for AstNodeId {
       ast::AstData::ConstDef(_) => { }
       ast::AstData::ConstInitVal(c_init_val) => {
         match c_init_val {
-          ast::ConstInitVal::Single(const_exp, _) => {
-            ast_nodes_write(self.inner(), |node| {
-              let data = ast_node_into!(node, ConstExp);
-              data.1 = const_exp.const_single_value();
-            })?;
+          ast::ConstInitVal::Single(sub_const_exp, _) => {
+            let value_gathered = sub_const_exp.const_single_value();
+            ast_data_write_as!(self.inner(), ConstInitVal, |cur_data| {
+              *cur_data.const_mut().unwrap() = value_gathered;
+            });
           },
           ast::ConstInitVal::Sequence(_) => ()
         };
@@ -247,13 +233,13 @@ impl Semantics for AstNodeId {
       ast::AstData::VarDef(_) => { }
       ast::AstData::InitVal(init_val) => {
         match init_val {
-            ast::InitVal::Single(exp, _) => {
-              ast_nodes_write(self.inner(), |node| {
-                let data = ast_node_into!(node, ConstExp);
-                data.1 = exp.const_single_value();
-              })?;
+            ast::InitVal::Single(sub_exp, _) => {
+              let value_gathered = sub_exp.const_single_value();
+              ast_data_write_as!(self.inner(), InitVal, |cur_data| {
+                *cur_data.const_mut().unwrap() = value_gathered;
+              });
             }
-            ast::InitVal::Sequence(_, _) => ()
+            ast::InitVal::Sequence(_) => ()
         }
       }
       ast::AstData::FuncDef(_) => { }
@@ -263,23 +249,89 @@ impl Semantics for AstNodeId {
       ast::AstData::BlockItem(_) => { }
       ast::AstData::Stmt(_) => { }
       ast::AstData::Exp(exp) => {
-        ast_nodes_write(self.inner(), |node| {
-          let data = ast_node_into!(node, ConstExp);
-          data.1 = exp.l_or_exp.const_single_value();
-        })?;
+        let value_gathered = exp.l_or_exp.const_single_value();
+        ast_data_write_as!(self.inner(), Exp, |data| {
+          data.const_value = value_gathered
+        });
       }
-      ast::AstData::LVal(_) => todo!(),
-      ast::AstData::PrimaryExp(_) => todo!(),
-      ast::AstData::UnaryExp(_) => todo!(),
-      ast::AstData::FuncRParams(_) => todo!(),
-      ast::AstData::BinaryExp(_) => todo!(),
-      ast::AstData::ConstExp(_) => todo!(),
+      ast::AstData::LVal(_) => { }
+      ast::AstData::PrimaryExp(exp) => {
+        match exp {
+          ast::PrimaryExp::Exp(sub_exp, _) => {
+            let value_gathered = sub_exp.const_single_value();
+            ast_data_write_as!(self.inner(), PrimaryExp, |data| {
+              *data.const_mut().unwrap() = value_gathered;
+            });
+          }
+          ast::PrimaryExp::LVal(_) => { }
+          ast::PrimaryExp::Number(_) => { }
+        }
+      }
+      ast::AstData::UnaryExp(uexp) => {
+        match uexp {
+          ast::UnaryExp::PrimaryExp { pexp, .. } => {
+            let value_gathered = pexp.const_single_value();
+            ast_data_write_as!(self.inner(), UnaryExp, |data| {
+              *data.const_mut().unwrap() = value_gathered;
+            });
+          }
+          ast::UnaryExp::Call { .. } => { }
+          ast::UnaryExp::Unary { exp: sub_exp, op, .. } => {
+            let value = if let Some(v) = sub_exp.const_single_value() {
+              Some(UnaryOp::eval(op, v))
+            } else {
+              None
+            };
+
+            ast_data_write_as!(self.inner(), UnaryExp, |data| {
+              *data.const_mut().unwrap() = value;
+            });
+          }
+        }
+      }
+      ast::AstData::FuncRParams(_) => { }
+      ast::AstData::BinaryExp(bexp) => {
+        match bexp {
+          // For binary exp, there must be a const slot.
+          // But we still need to match since there are two kinds of method to 
+          // evaluate: (unary | binary)
+          ast::BinaryExp::Unary { exp: sub_exp, .. } => {
+            let value = sub_exp.const_single_value();
+            ast_data_write_as!(self.inner(), BinaryExp, |data| {
+              *data.const_mut() = value;
+            });
+          }
+          ast::BinaryExp::Binary { lhs, op, rhs, .. } => {
+            let lhs_value = lhs.const_single_value();
+            let rhs_value = rhs.const_single_value();
+            let value = if let (Some(lhs), Some(rhs)) = (lhs_value, rhs_value) {
+              Some(BinaryOp::eval(lhs, op, rhs))
+            } else {
+              None
+            };
+
+            ast_data_write_as!(self.inner(), BinaryExp, |data| {
+              *data.const_mut() = value;
+            });
+          
+          }
+        }
+      }
+      ast::AstData::ConstExp(const_exp) => {
+        let value = const_exp.0.const_single_value();
+        ast_data_write_as!(self.inner(), ConstExp, |data| {
+          data.1 = value;
+        });
+      }
     }
     Ok(())
   }
 
   /// Check if the children of the node have the correct type.
   fn children_ty_sanify_check(&self) -> SemaRes {
+    return Ok(()); // TODO: future work.
+
+
     let ast_data = self.get_ast_data();
     match ast_data {
       ast::AstData::CompUnit(_) => todo!(),
@@ -308,8 +360,17 @@ impl Semantics for AstNodeId {
   }
   
   /// Preprocess the node before the children are processed.
-  /// Specific to the node type.
-  fn ty_specific_preprocess(&self) -> SemaRes {
+  /// Specific to the node type.\
+  /// Things we handle here: 
+  /// - symbol table creation
+  /// - symbol table entry insertion for FuncDef
+  fn sema_preprocess(&self) -> SemaRes {
+
+    self.children_ty_sanify_check()?;
+    if self.should_own_sym_table() {
+      self.create_symbol_table();
+    }
+
     let ast_data = self.get_ast_data();
     match ast_data {
       ast::AstData::CompUnit(_) => { }, 
@@ -362,9 +423,14 @@ impl Semantics for AstNodeId {
     Ok(())
   }
 
-  /// Postprocess the node before the children are processed.
+  /// sema_Postprocess the node before the children are processed.
   /// Specific to the node type.
-  fn ty_specific_postprocess(&self) -> SemaRes {
+  /// Things we handle here:
+  /// - constant folding
+  /// - symbol table entry insertion for ConstDef and VarDef
+  fn sema_postprocess(&self) -> SemaRes {
+    self.const_eval()?;
+
     let ast_data = self.get_ast_data();
     match ast_data {
       ast::AstData::CompUnit(_) => { }

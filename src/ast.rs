@@ -9,7 +9,7 @@ use crate::utils::uuid_mapper::UuidOwner;
 macro_rules! ast_is {
   ($node_id:expr, $variant:ident) => {
     ast_nodes_read(
-      $node_id,
+      $node_id.inner(),
       |node| matches!(&node.ast, ast::AstData::$variant(_)),
     ).unwrap()
   };
@@ -22,7 +22,7 @@ macro_rules! ast_node_into {
     if let ast::AstData::$variant(data) = &mut $node.ast {
       data
     } else {
-      panic!("ast_as!() failed")
+      panic!("ast_node_into!() failed")
     }
   };
 }
@@ -34,16 +34,43 @@ macro_rules! ast_into {
     ast_nodes_read(
       $node_id,
       |node| {
-        if let ast::AstData::$variant(data) = &node.ast {
-          data.clone()
+        ast_node_into!(node, $variant).clone()
+      },
+    ).unwrap()
+  };
+}
+
+#[macro_export]
+macro_rules! ast_data_read_as {
+  ($node_id:expr, $variant:ident, |$data:ident| $closure:expr) => {
+    ast_nodes_read(
+      $node_id,
+      |node| {
+        if let ast::AstData::$variant($data) = &node.ast {
+          $closure
         } else {
-          panic!("ast_as!() failed")
+          panic!("ast_data_read_as!() failed")
         }
       },
     ).unwrap()
   };
 }
 
+#[macro_export]
+macro_rules! ast_data_write_as {
+  ($node_id:expr, $variant:ident, |$data:ident| $closure:expr) => {
+    ast_nodes_write(
+      $node_id,
+      |node| {
+        if let ast::AstData::$variant($data) = &mut node.ast {
+          $closure
+        } else {
+          panic!("ast_data_read_as!() failed")
+        }
+      },
+    ).unwrap()
+  };
+}
 
 global_mapper!(AST_NODES, ast_nodes_read, ast_nodes_write, ast_nodes_register, AstNode);
 
@@ -58,54 +85,49 @@ impl AstNodeId {
   }
   
   /// Get const single value inside of a node
-  /// Returns None if the node can not be evaluated to a single value due to variables.
-  /// # Panic
-  /// Panic if the AstNodeId does not exist.\
-  /// Panic if there is no const single value slot in this node.\
-  /// Panic if the const value is not evaluated for nodes that must have a const value.
   pub fn const_single_value(&self) -> Option<i32> {
     match self.get_ast_data() {
-        AstData::ConstInitVal(c_init_val) => {
-            match c_init_val {
-                ConstInitVal::Single(_, v) => v,
-                _ => panic!("A const init val is not evaluated when const_single_value()")
-            }
+      AstData::ConstInitVal(c_init_val) => {
+        match c_init_val {
+            ConstInitVal::Single(_, v) => v,
+            _ => panic!("A const init val is not evaluated when const_single_value()")
         }
-        AstData::InitVal(InitVal::Single(_, v)) => v,
-        AstData::Exp(exp) => {
-          match exp {
-            Exp{const_value: Some(v), ..} => Some(v),
-            _ => None
-          }
+      }
+      AstData::InitVal(InitVal::Single(_, v)) => v,
+      AstData::Exp(exp) => {
+        match exp {
+          Exp{const_value: Some(v), ..} => Some(v),
+          _ => None
         }
-        AstData::PrimaryExp(exp) => {
-          match exp {
-            PrimaryExp::Exp(_, Some(v)) |
-            PrimaryExp::Number(v) => Some(v),
-            _ => None
-          }
+      }
+      AstData::PrimaryExp(exp) => {
+        match exp {
+          PrimaryExp::Exp(_, Some(v)) |
+          PrimaryExp::Number(v) => Some(v),
+          _ => None
         }
-        AstData::UnaryExp(exp) => {
-          match exp {
-            UnaryExp::PrimaryExp{const_value: Some(v), ..} | 
-            UnaryExp::Unary{const_value: Some(v), ..} => Some(v),
-            _ => None
-          }
+      }
+      AstData::UnaryExp(exp) => {
+        match exp {
+          UnaryExp::PrimaryExp{const_value: Some(v), ..} | 
+          UnaryExp::Unary{const_value: Some(v), ..} => Some(v),
+          _ => None
         }
-        AstData::BinaryExp(exp) => {
-          match exp {
-            BinaryExp::Unary{const_value: Some(v), ..} |
-            BinaryExp::Binary{const_value: Some(v), ..} => Some(v),
-            _ => None
-          }
+      }
+      AstData::BinaryExp(exp) => {
+        match exp {
+          BinaryExp::Unary{const_value: Some(v), ..} |
+          BinaryExp::Binary{const_value: Some(v), ..} => Some(v),
+          _ => None
         }
-        AstData::ConstExp(exp) => {
-          match exp {
-            ConstExp(_, Some(v)) => Some(v),
-            _ => None
-          }
+      }
+      AstData::ConstExp(exp) => {
+        match exp {
+          ConstExp(_, Some(v)) => Some(v),
+          _ => panic!("A const exp is not evaluated when const_single_value()")
         }
-        _ => panic!("There is no const single value slot in this node")
+      }
+      _ => None
     }
   }
 }
@@ -200,7 +222,7 @@ impl AstNode {
   }
 
   pub fn new_init_val_sequence(init_vals: Vec<AstNodeId>) -> AstNodeId {
-    let ast = AstData::InitVal(InitVal::Sequence(init_vals, None));
+    let ast = AstData::InitVal(InitVal::Sequence(init_vals));
     AstNode::register(AstNode::new(ast))
   }
 
@@ -353,7 +375,7 @@ impl AstNode {
 
 
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub enum AstData {
   CompUnit(CompUnit),
   Decl(Decl),
@@ -413,7 +435,7 @@ impl AstData {
         res
       },
       AstData::InitVal(InitVal::Single(exp, _)) => vec![exp.clone()],
-      AstData::InitVal(InitVal::Sequence(init_vals, _)) => init_vals.clone(),
+      AstData::InitVal(InitVal::Sequence(init_vals)) => init_vals.clone(),
       AstData::FuncDef(FuncDef{func_f_params, block, ..}) => vec![func_f_params.clone(), block.clone()],
       AstData::FuncFParams(FuncFParams{params}) => params.clone(),
       AstData::FuncFParam(FuncFParam::Single{btype, ..}) => vec![btype.clone()],
@@ -458,19 +480,19 @@ impl AstData {
   }
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct CompUnit {
   /// [AstData::Decl] | [AstData::FuncDef]
   pub items: Vec<AstNodeId>
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub enum Decl {
   ConstDecl(AstNodeId),
   VarDecl(AstNodeId),
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct ConstDecl {
   /// [AstData::BType]
   pub btype: AstNodeId,
@@ -481,14 +503,14 @@ pub struct ConstDecl {
 
 pub struct BType;
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct ConstIdxList {
   /// [AstData::ConstExp]
   pub const_exps: Vec<AstNodeId>, 
   pub eval_out: Option<Vec<i32>>
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct ConstDef {
   pub ident: String,
   /// [AstData::ConstExp]
@@ -503,7 +525,7 @@ impl ConstDef {
   }
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub enum ConstInitVal {
   /// Contains an [AstData::ConstExp]
   Single(AstNodeId, Option<i32>),
@@ -511,7 +533,16 @@ pub enum ConstInitVal {
   Sequence(Vec<AstNodeId>)
 }
 
-#[derive(Clone)]
+impl ConstInitVal {
+  pub fn const_mut(&mut self) -> Option<&mut Option<i32>> {
+    match self {
+      ConstInitVal::Single(_, v) => v.into(),
+      _ => None
+    }
+  }
+}
+
+#[derive(Debug, Clone)]
 pub struct VarDecl {
   /// [AstData::BType]
   pub btype: AstNodeId,
@@ -520,7 +551,7 @@ pub struct VarDecl {
   pub var_defs: Vec<AstNodeId>,
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct VarDef {
   pub ident: String,
   /// [AstData::ConstExp]
@@ -539,16 +570,25 @@ impl VarDef {
   }
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub enum InitVal {
   /// [AstData::Exp]
   Single(AstNodeId, Option<i32>),
 
   /// [AstData::InitVal]
-  Sequence(Vec<AstNodeId>, Option<i32>)
+  Sequence(Vec<AstNodeId>)
 }
 
-#[derive(Clone)]
+impl InitVal {
+  pub fn const_mut(&mut self) -> Option<&mut Option<i32>> {
+    match self {
+      InitVal::Single(_, v) => v.into(),
+      _ => None
+    }
+  }
+}
+
+#[derive(Debug, Clone)]
 pub struct FuncDef {
   /// void or int
   pub has_retval: bool, 
@@ -559,13 +599,13 @@ pub struct FuncDef {
   pub block: AstNodeId,
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct FuncFParams {
   /// [AstData::FuncFParam]
   pub params: Vec<AstNodeId>
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub enum FuncFParam {
   Single{
     /// [AstData::BType]
@@ -593,13 +633,13 @@ impl FuncFParam {
 
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct Block {
   /// [AstData::BlockItem]
   pub items: Vec<AstNodeId>,
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub enum BlockItem {
   /// Contains an [AstData::Decl]
   Decl(AstNodeId), 
@@ -607,7 +647,7 @@ pub enum BlockItem {
   Stmt(AstNodeId), 
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub enum Stmt {
   /// Contains an [AstData::LVal and an [AstData::Exp]
   Assign(AstNodeId, AstNodeId),
@@ -635,21 +675,21 @@ pub enum Stmt {
   Return(Option<AstNodeId>),
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct Exp {
   /// [AstData::LOrExp]
   pub l_or_exp: AstNodeId, 
   pub const_value: Option<i32>,
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct LVal {
   pub ident: String, 
   /// [AstData::Exp]
   pub idx: Vec<AstNodeId>,
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub enum PrimaryExp {
   /// Contains an [AstData::Exp]
   Exp(AstNodeId, Option<i32>),
@@ -658,7 +698,16 @@ pub enum PrimaryExp {
   Number(i32),
 }
 
-#[derive(Clone)]
+impl PrimaryExp {
+  pub fn const_mut(&mut self) -> Option<&mut Option<i32>> {
+    match self {
+      PrimaryExp::Exp(_, v) => v.into(),
+      _ => None
+    }
+  }
+}
+
+#[derive(Debug, Clone)]
 pub enum UnaryExp {
   PrimaryExp{
     /// [AstData::PrimaryExp]
@@ -678,7 +727,17 @@ pub enum UnaryExp {
   },
 }
 
-#[derive(Clone, Copy)]
+impl UnaryExp {
+  pub fn const_mut(&mut self) -> Option<&mut Option<i32>> {
+    match self {
+      UnaryExp::PrimaryExp{const_value, ..} => const_value.into(),
+      UnaryExp::Unary{const_value, ..} => const_value.into(),
+      _ => None
+    }
+  }
+}
+
+#[derive(Debug, Clone, Copy)]
 pub enum UnaryOp {
   Pos,
   Neg,
@@ -704,13 +763,13 @@ impl UnaryOp {
   }
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct FuncRParams {
   /// [AstData::Exp]
   pub params: Vec<AstNodeId>
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub enum BinaryExp {
   Unary{
     /// [AstData::UnaryExp]
@@ -721,13 +780,22 @@ pub enum BinaryExp {
     /// [AstData::BinaryExp]
     lhs: AstNodeId,
     op: BinaryOp,
-    /// [AstData::UnaryExp | [AstData::BinaryExp]
+    /// [AstData::UnaryExp] | [AstData::BinaryExp]
     rhs: AstNodeId,
     const_value: Option<i32>,
   },
 }
 
-#[derive(Clone, Copy)]
+impl BinaryExp {
+  pub fn const_mut(&mut self) -> &mut Option<i32> {
+    match self {
+      BinaryExp::Unary{const_value, ..} => const_value.into(),
+      BinaryExp::Binary{const_value, ..} => const_value.into(),
+    }
+  }
+}
+
+#[derive(Debug, Clone, Copy)]
 pub enum BinaryOp {
   Add,
   Sub,
@@ -783,8 +851,8 @@ impl BinaryOp {
   }
 }
 
-#[derive(Clone)]
-/// Contains an [AstData::Exp]
+#[derive(Debug, Clone)]
+/// Contains an [AstData::Exp] and the const evaluation result
 pub struct ConstExp(pub AstNodeId, pub Option<i32>);
 
 impl TreeId for AstNodeId {
@@ -804,5 +872,40 @@ impl TreeId for AstNodeId {
   /// Panic if the AstNodeId does not exist.
   fn get_childrens(&self) -> Vec<AstNodeId> {
     self.get_ast_data().get_childrens()
+  }
+}
+
+impl AstNodeId {
+  pub fn to_string(&self, human_friendly: bool) -> String {
+    // use dfs visitor
+    let res = std::cell::RefCell::new(String::new());
+    let depth = std::cell::RefCell::new(0);
+    let visitor 
+      = crate::utils::dfs::DfsVisitor::<_, _, AstNodeId>::new(
+        |node| {
+          *depth.borrow_mut() += 1;
+          let data = node.get_ast_data();
+          let mut res = res.borrow_mut();
+          if human_friendly {
+            res.push_str(&format!("{}{:?} {{\n", "  ".repeat(*depth.borrow()), data));
+          } else {
+            res.push_str(&format!("{:?} {{", data));
+          }
+
+          Ok(())
+        },
+        |_| { 
+          *depth.borrow_mut() -= 1;
+          let mut res = res.borrow_mut();
+          if human_friendly {
+            res.push_str(&format!("{}}}\n", "  ".repeat(*depth.borrow())));
+          } else {
+            res.push_str("}");
+          }
+          Ok(())
+        },
+      );
+    visitor.dfs(self).unwrap();
+    res.take()
   }
 }

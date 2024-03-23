@@ -1,5 +1,10 @@
 
-pub struct DfsVisitor<Fpre, Fpost, T: TreeId> {
+pub struct DfsVisitor<Fpre, Fpost, T> 
+where 
+  Fpre: Fn(&T) -> Result<(), String>,
+  Fpost: Fn(&T) -> Result<(), String>,
+  T: TreeId
+{
   pre_process: Fpre,
   post_process: Fpost,
   phantom: std::marker::PhantomData<T>,
