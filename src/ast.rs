@@ -1,6 +1,6 @@
 use std::fmt::{Formatter};
 
-use crate::{define_wrapper, global_mapper, utils::dfs::TreeId};
+use crate::{define_wrapper, global_mapper, semantics::SymIdent, utils::dfs::TreeId};
 use uuid::Uuid;
 
 use crate::utils::uuid_mapper::UuidOwner;
@@ -11,7 +11,7 @@ use crate::utils::uuid_mapper::UuidOwner;
 macro_rules! ast_is {
   ($node_id:expr, $variant:ident) => {
     ast_nodes_read(
-      $node_id.inner(),
+      $node_id,
       |node| matches!(&node.ast, ast::AstData::$variant(_)),
     ).unwrap()
   };
@@ -34,7 +34,7 @@ macro_rules! ast_node_into {
 macro_rules! ast_into {
   ($node_id:expr, $variant:ident) => {
     ast_nodes_read(
-      $node_id.inner(),
+      $node_id,
       |node| {
         ast_node_into!(node, $variant).clone()
       },
@@ -46,7 +46,7 @@ macro_rules! ast_into {
 macro_rules! ast_data_read_as {
   ($node_id:expr, $variant:ident, |$data:ident| $closure:expr) => {
     ast_nodes_read(
-      $node_id.inner(),
+      $node_id,
       |node| {
         if let ast::AstData::$variant($data) = &node.ast {
           $closure
@@ -62,7 +62,7 @@ macro_rules! ast_data_read_as {
 macro_rules! ast_data_write_as {
   ($node_id:expr, $variant:ident, |$data:ident| $closure:expr) => {
     ast_nodes_write(
-      $node_id.inner(),
+      $node_id,
       |node| {
         if let ast::AstData::$variant($data) = &mut node.ast {
           $closure
@@ -81,7 +81,7 @@ impl AstNodeId {
   /// # Panic
   /// Panic if the AstNodeId does not exist.
   pub fn get_ast_data(&self) -> AstData {
-    ast_nodes_read(self.inner(), |node| {
+    ast_nodes_read(self, |node| {
       node.ast.clone()
     }).unwrap()
   }
@@ -92,21 +92,20 @@ impl AstNodeId {
       AstData::ConstInitVal(c_init_val) => {
         match c_init_val {
             ConstInitVal::Single(_, v) => v,
-            _ => panic!("A const init val is not evaluated when const_single_value()")
+            ConstInitVal::Sequence(_) => None
         }
       }
       AstData::InitVal(InitVal::Single(_, v)) => v,
       AstData::Exp(exp) => {
         match exp {
-          Exp{const_value: Some(v), ..} => Some(v),
-          _ => None
+          Exp{const_value, ..} => const_value
         }
       }
       AstData::PrimaryExp(exp) => {
         match exp {
-          PrimaryExp::Exp(_, Some(v)) |
+          PrimaryExp::Exp(_, v) => v, 
           PrimaryExp::Number(v) => Some(v),
-          _ => None
+          PrimaryExp::LVal(_, v) => v
         }
       }
       AstData::UnaryExp(exp) => {
@@ -126,7 +125,13 @@ impl AstNodeId {
       AstData::ConstExp(exp) => {
         match exp {
           ConstExp(_, Some(v)) => Some(v),
-          _ => panic!("A const exp is not evaluated when const_single_value()")
+          _ => panic!("ConstExp {:?} is not evaluated when const_single_value()", exp)
+        }
+      }
+      AstData::LVal(lval) => {
+        match lval {
+          LVal{const_value: Some(v), ..} => Some(v),
+          _ => None
         }
       }
       _ => None
@@ -136,11 +141,11 @@ impl AstNodeId {
 
 define_wrapper!(AstNodeId, Uuid);
 
-impl std::fmt::Debug for AstNodeId {
-  fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-    write!(f, "[OMITTED]")
-  }
-}
+// impl std::fmt::Debug for AstNodeId {
+//   fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+//     write!(f, "[OMITTED]")
+//   }
+// }
 
 pub struct AstNode {
   pub id: AstNodeId, 
@@ -400,6 +405,20 @@ pub struct LVal {
   pub ident: String, 
   /// [AstData::Exp]
   pub idx: Vec<AstNodeId>,
+  pub const_value: Option<i32>
+}
+
+impl LVal {
+  pub fn is_array(&self) -> bool {
+    self.idx.len() > 0
+  }
+
+  /// Get the symbol of the value of the LVal
+  /// 
+  /// LVal can only represent a value symbol.
+  pub fn get_value_symbol(&self) -> SymIdent {
+    SymIdent::Value(self.ident.clone())
+  }
 }
 
 #[derive(Debug, Clone)]
@@ -407,7 +426,7 @@ pub enum PrimaryExp {
   /// Contains an [AstData::Exp]
   Exp(AstNodeId, Option<i32>),
   /// Contains an [AstData::LVal]
-  LVal(AstNodeId),
+  LVal(AstNodeId, Option<i32>),
   Number(i32),
 }
 
@@ -415,7 +434,8 @@ impl PrimaryExp {
   pub fn const_mut(&mut self) -> Option<&mut Option<i32>> {
     match self {
       PrimaryExp::Exp(_, v) => v.into(),
-      _ => None
+      PrimaryExp::LVal(_, v) => v.into(),
+      PrimaryExp::Number(_) => None
     }
   }
 }
@@ -608,13 +628,13 @@ impl AstNodeId {
           Ok(())
         },
         |_| { 
-          *depth.borrow_mut() -= 1;
           let mut res = res.borrow_mut();
           if human_friendly {
             res.push_str(&format!("{}}}\n", "  ".repeat(*depth.borrow())));
           } else {
             res.push_str("}");
           }
+          *depth.borrow_mut() -= 1;
           Ok(())
         },
       );
@@ -631,7 +651,7 @@ impl AstNode {
     let cur_id = node.id.clone();
     AST_NODES.with_borrow_mut(|nodes| {
       for child in node.ast.get_childrens() {
-        let mut child = nodes.borrow_mut(&child.into()).unwrap();
+        let mut child = nodes.borrow_mut(&child).unwrap();
         child.parent = Some(cur_id.clone());
       }
     });
@@ -784,7 +804,7 @@ impl AstNode {
   }
 
   pub fn new_lval(ident: String, idx: Vec<AstNodeId>) -> AstNodeId {
-    let ast = AstData::LVal(LVal{ident, idx});
+    let ast = AstData::LVal(LVal{ident, idx, const_value: None});
     AstNode::register(AstNode::new(ast))
   }
 
@@ -794,7 +814,7 @@ impl AstNode {
   }
 
   pub fn new_primary_exp_lval(lval: AstNodeId) -> AstNodeId {
-    let ast = AstData::PrimaryExp(PrimaryExp::LVal(lval));
+    let ast = AstData::PrimaryExp(PrimaryExp::LVal(lval, None));
     AstNode::register(AstNode::new(ast))
   }
 

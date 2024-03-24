@@ -20,12 +20,13 @@ pub struct SymbolTable {
   pub entries: HashMap<SymIdent, SymTableEntry>,
 }
 
+/// Sys-y allows a function and a value to have the same name.
 #[derive(Clone, PartialEq, Eq)]
 pub enum SymIdent {
   Func(String),
 
   /// Including (constant | variable) (single value | arrays).
-  /// Sys-y allows a function and a value to have the same name.
+  /// I.e. all in LVal.
   Value(String)
 }
 
@@ -63,12 +64,40 @@ impl SymbolTable {
     self.entries.insert(entry.symbol.clone(), entry);
     Ok(())
   }
+
+  pub fn get_entry(&self, symbol: &SymIdent) -> Option<&SymTableEntry> {
+    self.entries.get(symbol)
+  }
+
+  pub fn get_value_entry(&self, val_symbol: &String) -> Option<&SymTableEntry> {
+    return self.get_entry(&SymIdent::Value(val_symbol.clone()));
+  }
+
+  pub fn get_func_entry(&self, func_symbol: &String) -> Option<&SymTableEntry> {
+    return self.get_entry(&SymIdent::Func(func_symbol.clone()));
+  }
+
+  /// Get the constant single value inside the symbol table.
+  pub fn get_const_value_inside(&self, const_name: &String) -> Option<i32> {
+    if let Some(entry) = self.get_value_entry(&const_name) {
+      match &entry.kind {
+        SymTableEntryKind::Const(const_def) => {
+          if const_def.is_array() {
+            return None;
+          }
+          return Some(const_def.const_init_val.const_single_value().unwrap());
+        }
+        _ => return None
+      }
+    }
+    None
+  }
 }
 
 
 impl UuidOwner for SymbolTable {
   fn id(&self) -> Uuid {
-    self.id.inner().inner().clone()
+    (**self.id).clone()
   }
 } 
 
@@ -82,7 +111,7 @@ impl SymTableEntry {
   /// Insert the entry into the last level symbol table of the given ast node.
   fn into_llt(self, id: &AstNodeId) -> SemaRes {
     let table_id = id.last_level_sym_table();
-    sym_tables_write(&table_id.inner().inner(), |table| {
+    sym_tables_write(&table_id, |table| {
       table.insert_entry(self)
     })?
   }
@@ -114,12 +143,21 @@ global_mapper!(SYMBOLS, sym_tables_read, sym_tables_write, sym_tables_register, 
 
 define_wrapper!(SymTableId, AstNodeId);
 
+impl SymTableId {
+  pub fn get_const_value_inside(&self, const_name: &String) -> Option<i32> {
+    sym_tables_read(self, |table| {
+      table.get_const_value_inside(const_name)
+    }).unwrap()
+  }
+}
+
 pub trait SymTableOwner { 
   fn create_symbol_table(&self); 
   fn get_sym_table(&self) -> Option<SymTableId>;
   fn all_sym_tables(&self) -> Vec<SymTableId>;
   fn last_level_sym_table(&self) -> SymTableId;
   fn global_sym_table(&self) -> SymTableId;
+  fn get_const_value(&self, const_name: String) -> Option<i32>;
 }
 
 impl SymTableOwner for AstNodeId {
@@ -135,13 +173,13 @@ impl SymTableOwner for AstNodeId {
 
   
   fn get_sym_table(&self) -> Option<SymTableId> {
-    sym_tables_read(self.inner(), |sym_tables| {
+    sym_tables_read(self, |sym_tables| {
       sym_tables.id.clone()
     }).ok()
   }
 
   /// Get all tables on the stack. 
-  /// The first one is the global table, and the last one is the current table
+  /// The last one is the global table, and the first one is the current table
   /// Therefore, the return length is at least one.
   fn all_sym_tables(&self) -> Vec<SymTableId> {
     let mut tables = Vec::new();
@@ -150,18 +188,30 @@ impl SymTableOwner for AstNodeId {
       tables.extend(node.get_sym_table());
       cur = node.get_parent();
     } 
-    tables.reverse();
+    assert!(tables.len() > 0, "No global symbol table found");
     tables
   }
 
   fn last_level_sym_table(&self) -> SymTableId {
     let tables = self.all_sym_tables();
-    tables.last().unwrap().clone()
+    tables.first().unwrap().clone()
   }
 
   fn global_sym_table(&self) -> SymTableId {
     let tables = self.all_sym_tables();
-    tables.first().unwrap().clone()
+    tables.last().unwrap().clone()
+  }
+  
+  /// Try to get the constant value in the nodes symbol table stacks.
+  fn get_const_value(&self, const_name: String) -> Option<i32> {
+    let tables = self.all_sym_tables();
+    for table in tables { // the order is important.
+      let try_get = table.get_const_value_inside(&const_name);
+      if try_get.is_some() {
+        return try_get;
+      }
+    }
+    None  
   }
 }
 
@@ -253,7 +303,16 @@ impl Semantics for AstNodeId {
           data.const_value = value_gathered
         });
       }
-      ast::AstData::LVal(_) => { }
+      ast::AstData::LVal(lval) => {
+        // Some lval can be a constant.
+        // Note Again: we only consider the case where the lval is a single value.
+        if lval.is_array() == false {
+          let value_gathered = self.get_const_value(lval.ident);
+          ast_data_write_as!(self, LVal, |data| {
+            data.const_value = value_gathered;
+          });
+        }
+      }
       ast::AstData::PrimaryExp(exp) => {
         match exp {
           ast::PrimaryExp::Exp(sub_exp, _) => {
@@ -262,7 +321,12 @@ impl Semantics for AstNodeId {
               *data.const_mut().unwrap() = value_gathered;
             });
           }
-          ast::PrimaryExp::LVal(_) => { }
+          ast::PrimaryExp::LVal(sub_lval, _) => {
+            let value_gathered = sub_lval.const_single_value();
+            ast_data_write_as!(self, PrimaryExp, |data| {
+              *data.const_mut().unwrap() = value_gathered;
+            });
+          }
           ast::PrimaryExp::Number(_) => { }
         }
       }
@@ -317,6 +381,7 @@ impl Semantics for AstNodeId {
         }
       }
       ast::AstData::ConstExp(const_exp) => {
+        println!("{}", self.to_string(true));
         let value = const_exp.0.const_single_value();
         ast_data_write_as!(self, ConstExp, |data| {
           data.1 = value;

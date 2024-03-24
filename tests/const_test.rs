@@ -4,11 +4,11 @@ lalrpop_mod!(sysy);
 
 
 /// Get the return value of the main function if it is a constant
+/// 
 /// Returns None if it is not.
 /// # Panic
 /// Panic if the main function is not found
 fn get_return_const(ast: &AstNodeId) -> Option<i32> {
-  // println!("{}", ast.to_string(true));
 
   let mut ret_val = None;
 
@@ -17,7 +17,7 @@ fn get_return_const(ast: &AstNodeId) -> Option<i32> {
       if ast_is!(item, FuncDef) {
         ast_data_read_as!(item, FuncDef, |func_def| {
           if func_def.ident == "main" {
-            ast_data_read_as!(func_def.block, Block, |block| {
+            ast_data_read_as!(&func_def.block, Block, |block| {
               for item in &block.items {
                 ast_data_read_as!(item, BlockItem, |block_item| {
                   if let ast::BlockItem::Stmt(stmt) = block_item {
@@ -26,7 +26,6 @@ fn get_return_const(ast: &AstNodeId) -> Option<i32> {
                         ast::Stmt::Return(ret) => {
                           match ret {
                             Some(exp) => {
-                              println!("{}", exp.to_string(true));
                               ast_data_read_as!(exp, Exp, |exp| {
                                 ret_val = exp.const_value;
                               });
@@ -77,4 +76,22 @@ int main() {
   let ast = sysy::_CompUnitParser::new().parse(&progs).unwrap();
   ast.semantics_analyze().unwrap();
   assert!(get_return_const(&ast).is_none());
+}
+
+#[test]
+fn can_fold_const_hard() {
+  let progs = String::from(
+    r#"
+const int b = 100;
+int main() {
+  const int c = 10, a = 100 + (+b) + c; // 210
+  return a + b + c; 
+}
+  "#);
+
+  let ast = sysy::_CompUnitParser::new().parse(&progs).unwrap();
+  println!("{}", ast.to_string(true));
+  ast.semantics_analyze().unwrap();
+
+  assert_eq!(get_return_const(&ast).unwrap(), 210 + 100 + 10);
 }
