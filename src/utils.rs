@@ -1,0 +1,38 @@
+
+pub mod uuid_mapper;
+pub mod dfs;
+
+/// A macro to create wrapper for a given type
+#[macro_export]
+macro_rules! define_wrapper {
+  ($name:ident, $inner:ty) => {
+    #[derive(Debug, Clone)]
+    pub struct $name(pub $inner);
+
+    impl std::ops::Deref for $name {
+      type Target = $inner;
+      fn deref(&self) -> &Self::Target {
+        &self.0
+      }
+    }
+
+    impl Into<$inner> for $name {
+      fn into(self) -> $inner {
+        self.0
+      }
+    }
+    impl Into<$name> for $inner {
+      fn into(self) -> $name {
+        $name(self)
+      }
+    }
+    impl $name {
+      pub fn inner(&self) -> &$inner {
+        &self.0
+      }
+      pub fn inner_mut(&mut self) -> &mut $inner {
+        &mut self.0
+      }
+    }
+  };
+}

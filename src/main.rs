@@ -1,16 +1,9 @@
-pub mod ast;
-
+mod pg;
+use sysy_compiler::ast::AstNodeId;
 use clap::Parser;
-use ::koopa::ir::builder::ValueBuilder;
 use lalrpop_util::lalrpop_mod;
-use std::env::args;
 use std::fs::read_to_string;
 use std::io::Result;
-
-use ::koopa::ir::*;
-use ::koopa::back::*;
-use ::koopa::ir::builder::BasicBlockBuilder;
-use ::koopa::ir::builder::LocalInstBuilder;
 
 lalrpop_mod!(sysy);
 
@@ -32,19 +25,20 @@ fn main() -> Result<()> {
   let args = Cli::parse();
 
   let input = args.input;
-  let output = args.output;
-  
+  let _output = args.output;
 
   let input = read_to_string(input)?;
 
-  let ast: ast::prog::CompUnit = sysy::_CompUnitParser::new().parse(&input).unwrap();
-  println!("{:?}", ast);
+  let _ast: AstNodeId = sysy::_CompUnitParser::new().parse(&input).unwrap();
+
+  // ast.semantics_analyze();
+
   if args.koopa.is_some() {
     assert!(args.riscv.is_none());
 
     // compile my ast 
   } else {
-    // let mut prog = Program::new();
+    let _prog = koopa::ir::Program::new();
     // let main = prog.new_func(FunctionData::with_param_names(
     //   "@main".into(),
     //   vec![],
