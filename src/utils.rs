@@ -1,12 +1,13 @@
-
-pub mod uuid_mapper;
 pub mod dfs;
+pub mod uuid_mapper;
+
+pub type Res = Result<(), String>;
 
 /// A macro to create wrapper for a given type
 #[macro_export]
 macro_rules! define_wrapper {
   ($name:ident, $inner:ty) => {
-    #[derive(Debug, Clone)]
+    #[derive(Clone)]
     pub struct $name(pub $inner);
 
     impl std::ops::Deref for $name {

@@ -1,9 +1,10 @@
 mod pg;
-use sysy_compiler::ast::AstNodeId;
+
 use clap::Parser;
 use lalrpop_util::lalrpop_mod;
 use std::fs::read_to_string;
 use std::io::Result;
+use sysy_compiler::ast::AstNodeId;
 
 lalrpop_mod!(sysy);
 
@@ -29,35 +30,16 @@ fn main() -> Result<()> {
 
   let input = read_to_string(input)?;
 
-  let _ast: AstNodeId = sysy::_CompUnitParser::new().parse(&input).unwrap();
+  let ast: AstNodeId = sysy::_CompUnitParser::new().parse(&input).unwrap();
 
-  // ast.semantics_analyze();
+  // koopa IR generation
+  let _prog = koopa::ir::Program::new();
 
   if args.koopa.is_some() {
     assert!(args.riscv.is_none());
 
-    // compile my ast 
+    // compile my ast
   } else {
-    let _prog = koopa::ir::Program::new();
-    // let main = prog.new_func(FunctionData::with_param_names(
-    //   "@main".into(),
-    //   vec![],
-    //   Type::get_i32(),
-    // ));
-    
-    // // let main_data = prog.func_mut(main);
-    // // let bb = main_data.dfg_mut().new_bb().basic_block(Some("%entry".into()));
-    // // main_data.layout_mut().bbs_mut().extend(vec![bb]);
-    
-    // // let ret_val = main_data.dfg_mut().new_value().integer(ast.func_def.block.stmt.num);
-    // // let ret_statement = main_data.dfg_mut().new_value().ret(Some(ret_val));
-    // // main_data.layout_mut().bb_mut(bb).insts_mut().extend([ret_statement]);
-    
-    // // open the output file
-    // let output_file = std::fs::File::create(output)?;
-    // let mut generator = KoopaGenerator::new(output_file);
-    // generator.generate_on(&prog)?;
-    
   }
   Ok(())
 }
