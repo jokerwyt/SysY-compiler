@@ -148,15 +148,21 @@
 //!     Takes a BB, produces a [koopa::ir::Value]
 //! }
 
-use core::panic;
+use core::panicking::panic;
 
 use koopa::ir::builder::{
   BasicBlockBuilder, GlobalBuilder, GlobalInstBuilder, LocalBuilder, LocalInstBuilder,
   ValueBuilder, ValueInserter,
 };
+use koopa::ir::dfg::DataFlowGraph;
+use koopa::ir::entities::BasicBlockData;
+use koopa::ir::layout::{InstList, Layout};
+use koopa::ir::values::GetElemPtr;
 use koopa::ir::{self, BasicBlock, Function, FunctionData, Program, Type, Value};
 
-use crate::ast::{AstData, AstNodeId, BinaryOp, ConstInitVal, Decl, FuncFParam, InitVal, UnaryOp};
+use crate::ast::{
+  AstData, AstNode, AstNodeId, BinaryOp, ConstInitVal, Decl, FuncFParam, InitVal, UnaryOp,
+};
 use crate::ast_data_write_as;
 use crate::sym_table::{SymIdent, SymTableEntry, SymTableEntryData};
 use crate::utils::dfs::{DfsVisitor, TreeId};
@@ -175,7 +181,7 @@ impl KoopaGen {
       }
       ast::AstData::LVal(lval) => {
         // Some lval can be a constant.
-        // Note Again: we only consider the case where the lval is a single value.
+        // Note Again: we only consider the case where the lval is an int.
         if lval.is_array() == false {
           return ast_id.find_const_int(lval.ident).unwrap();
         } else {
@@ -240,20 +246,22 @@ impl KoopaGen {
   pub fn gen_on_compile_unit(unit_id: &AstNodeId) -> Program {
     unit_id.create_symbol_table();
     let mut prog = Program::new();
+    let mut ctx = KoopaGenCtx::new(&mut prog);
+
     let comp_unit = unit_id.get_ast_data().into_comp_unit();
 
     for item in comp_unit.items {
       match item.get_ast_data() {
         ast::AstData::Decl(decl) => match decl {
           ast::Decl::ConstDecl(decl) | ast::Decl::VarDecl(decl) => {
-            KoopaGen::gen_on_global_decl(&decl, &mut prog)
+            KoopaGen::gen_on_decl(&decl, &mut ctx);
           }
         },
         ast::AstData::FuncDef(func_def) => {
           // generate the entry basic block, and put all initialized values into the symbol table.
           let params = KoopaGen::gen_on_func_fparams(&func_def.func_f_params);
 
-          let func = prog.new_func(FunctionData::with_param_names(
+          let func = ctx.prog_mut().new_func(FunctionData::with_param_names(
             func_def.ident.clone(),
             params.clone(),
             match func_def.has_retval {
@@ -263,7 +271,6 @@ impl KoopaGen {
           ));
 
           // generate the function body
-          let func_data = prog.func_mut(func);
 
           // add function into global symbol table
           SymTableEntry {
@@ -273,24 +280,17 @@ impl KoopaGen {
           }
           .into_llt(unit_id);
 
-          let entry_bb = func_data
-            .dfg_mut()
-            .new_bb()
-            .basic_block(Some("%entry".to_string()));
-          func_data.layout_mut().bbs_mut().extend([entry_bb]);
+          ctx.func = Some(func);
+          ctx.bb = Some(ctx.new_bb("%entry".to_string()));
 
           // re-Alloc the function parameters, and add them into the function symbol table.
           for (idx, (name, ty)) in params.iter().enumerate() {
             let name = name.clone().unwrap();
 
-            let alloc = func_data.dfg_mut().new_value().alloc(ty.clone());
-            let arg = func_data.params()[idx];
-            let store = func_data.dfg_mut().new_value().store(arg, alloc);
-            func_data
-              .layout_mut()
-              .bb_mut(entry_bb)
-              .insts_mut()
-              .extend([alloc, store]);
+            let alloc = ctx.func_data_mut().dfg_mut().new_value().alloc(ty.clone());
+            let arg = ctx.func_data_mut().params()[idx];
+            let store = ctx.func_data_mut().dfg_mut().new_value().store(arg, alloc);
+            ctx.insts_mut().extend([alloc, store]);
 
             let entry = SymTableEntry {
               symbol: SymIdent::Value(name),
@@ -302,7 +302,7 @@ impl KoopaGen {
             };
             entry.into_llt(&item);
           }
-          KoopaGen::gen_on_block(&func_def.block, func, entry_bb);
+          KoopaGen::gen_on_block(&func_def.block, &mut ctx);
         }
         _ => panic!("Invalid item in CompUnit"),
       }
@@ -310,7 +310,7 @@ impl KoopaGen {
     prog
   }
 
-  fn gen_on_global_decl(decl_id: &AstNodeId, prog: &mut Program) {
+  fn gen_on_decl(decl_id: &AstNodeId, ctx: &mut KoopaGenCtx) {
     let decl = decl_id.get_ast_data().into_decl();
     match decl {
       ast::Decl::ConstDecl(const_decl) => {
@@ -323,23 +323,37 @@ impl KoopaGen {
             shape.push(KoopaGen::eval_const_int(const_exp));
           }
 
-          // for const def, see whether it's a single value or an array.
+          // Integer or Aggregate, depends on the shape.
+          let value =
+            KoopaGen::gen_on_prog_init_val(&const_def.const_init_val, &shape, ctx.prog_mut());
+
+          // for const def, see whether it's an int or an array.
           if const_def.is_array() {
-            let aggre = KoopaGen::gen_on_global_init(&const_def.const_init_val, &shape, prog);
-            let alloc = prog.new_value().global_alloc(aggre);
+            // const array case.
+            let alloc;
+            if ctx.is_global() {
+              alloc = ctx.prog_mut().new_value().global_alloc(value);
+            } else {
+              // We are inside a function.
+              // A local array will be allocated and initialized via a store.
+              alloc = ctx.dfg_mut().new_value().alloc(shape.into_type());
+              let store = ctx.dfg_mut().new_value().store(value, alloc);
+              ctx.insts_mut().extend([alloc, store]);
+            }
+            // No matter global or local, the address is inserted into the symbol table.
             SymTableEntry {
               symbol: SymIdent::Value(const_def.ident.clone()),
               kind: SymTableEntryData::ArrayDef(alloc, shape.into_type()),
-              func: None,
+              func: ctx.func_handle(),
             }
             .into_llt(decl_id);
           } else {
-            // A Integer Value is inserted into the symbol table.
-            let value = KoopaGen::gen_on_global_init(&const_def.const_init_val, &shape, prog);
+            // const int case.
+            // No matter global or local, an int is inserted into the symbol table.
             SymTableEntry {
               symbol: SymIdent::Value(const_def.ident.clone()),
-              kind: SymTableEntryData::ConstIntDef(value.into_i32(prog)),
-              func: None,
+              kind: SymTableEntryData::ConstIntDef(value.into_i32(ctx.prog_mut())),
+              func: ctx.func_handle(),
             }
             .into_llt(decl_id);
           }
@@ -355,35 +369,30 @@ impl KoopaGen {
             shape.push(KoopaGen::eval_const_int(const_exp));
           }
 
-          // for var def, see whether it's a single value or an array.
+          let alloc = ctx.dfg_mut().new_value().alloc(shape.into_type());
+          ctx.insts_mut().extend([alloc]);
+
+          // Local var initialization.
+          if let Some(init_val) = &var_def.init_val {
+            // I f it has an initialization, we need to apply it locally.
+            KoopaGen::gen_on_local_init_val(init_val, &shape, ctx, alloc);
+          } else {
+            // Local var and no init_val. Do nothing.
+          }
+
           if var_def.is_array() {
-            let array_init;
-            // A variable doesn't have to be initialized.
-            if let Some(init_val) = &var_def.init_val {
-              // But if it's initialized, global array must have const initialized list.
-              array_init = KoopaGen::gen_on_global_init(init_val, &shape, prog);
-            } else {
-              // An uninitialized array will be zeroinit.
-              array_init = prog.new_value().zero_init(shape.into_type());
-            }
-            let alloc = prog.new_value().global_alloc(array_init);
             SymTableEntry {
               symbol: SymIdent::Value(var_def.ident.clone()),
               kind: SymTableEntryData::ArrayDef(alloc, shape.into_type()),
-              func: None,
+              func: ctx.func_handle(),
             }
             .into_llt(decl_id);
           } else {
             // A Integer Value is inserted into the symbol table.
-            let init = if let Some(init_val) = &var_def.init_val {
-              KoopaGen::gen_on_global_init(init_val, &vec![], prog).into_i32(prog)
-            } else {
-              0
-            };
             SymTableEntry {
               symbol: SymIdent::Value(var_def.ident.clone()),
-              kind: SymTableEntryData::VarIntDef(prog.new_value().integer(init)),
-              func: None,
+              kind: SymTableEntryData::VarIntDef(alloc),
+              func: ctx.func_handle(),
             }
             .into_llt(decl_id);
           }
@@ -404,28 +413,35 @@ impl KoopaGen {
   }
 
   /// Generate Koopa on a Sys-y Block.
-  /// Return the sink BasicBlock.
-  fn gen_on_block(ast_id: &AstNodeId, func: Function, base_bb: BasicBlock) -> BasicBlock {
+  /// Entry block is placed in the ctx.
+  /// When it returns, the current block in ctx is the sink block.
+  ///
+  fn gen_on_block(ast_id: &AstNodeId, ctx: &mut KoopaGenCtx) {
     let data = ast_id.get_ast_data().into_block();
-    let mut last_bb = base_bb;
 
     for item in data.items {
       match item.get_ast_data() {
         AstData::BlockItem(ast::BlockItem::Decl(decl)) => {
-          todo!()
+          Self::gen_on_decl(&decl, ctx);
         }
-        AstData::BlockItem(ast::BlockItem::Stmt(stmt)) => todo!(),
+        AstData::BlockItem(ast::BlockItem::Stmt(stmt)) => {
+          Self::gen_on_stmt(&stmt, ctx);
+          if ctx.bb.is_none() {
+            // Break or continue in the only path.
+            // We can drop all the following items.
+            return;
+          }
+        }
         _ => panic!("Invalid AstData for gen_on_block"),
       }
     }
-    last_bb
   }
 
   /// Generate an Koopa Aggregate or Integer on Sys-Y ConstInitVal or InitVal.
   /// The shape is the reference to the shape of the array.
   /// When the shape is empty, return an Integer.
   /// Otherwise, return an Aggregate.
-  fn gen_on_global_init(ast_id: &AstNodeId, shape: &[i32], prog: &mut Program) -> Value {
+  fn gen_on_prog_init_val(ast_id: &AstNodeId, shape: &[i32], prog: &mut Program) -> Value {
     let data = ast_id.get_ast_data();
 
     if shape.is_empty() {
@@ -467,7 +483,7 @@ impl KoopaGen {
         | AstData::InitVal(InitVal::Sequence(_)) => {
           let sub_shape = agg_builder.checker.append_sequence(true);
           agg_builder.push_sequence(
-            KoopaGen::gen_on_global_init(&init_val, sub_shape, prog),
+            KoopaGen::gen_on_prog_init_val(&init_val, sub_shape, prog),
             prog,
           )
         }
@@ -493,6 +509,479 @@ impl KoopaGen {
     }
     assert_eq!(agg_builder.stack.len(), 1);
     agg_builder.stack.first().unwrap().2
+  }
+
+  /// alloc is the ptr to the local array, or the local variable.
+  fn gen_on_local_init_val(
+    init_val: &AstNodeId,
+    shape: &[i32],
+    ctx: &mut KoopaGenCtx,
+    alloc: Value,
+  ) {
+    todo!()
+  }
+
+  /// Generate Koopa on a Sys-Y Stmt.
+  /// Return the possible sink block.
+  fn gen_on_stmt(stmt: &AstNodeId, ctx: &mut KoopaGenCtx<'_>) {
+    match stmt.get_ast_data().into_stmt() {
+      ast::Stmt::Assign(lval, exp) => {
+        let lval = KoopaGen::gen_on_lval(&lval, ctx, false);
+        let exp = KoopaGen::gen_on_exp(&exp, ctx);
+
+        let store = ctx.new_local_value().store(exp, lval);
+        ctx.append_ins(store);
+      }
+      ast::Stmt::Exp(e) => {
+        if let Some(exp) = e {
+          let _ = KoopaGen::gen_on_exp(&exp, ctx);
+        }
+      }
+      ast::Stmt::Block(_) => {
+        KoopaGen::gen_on_block(stmt, ctx);
+      }
+      ast::Stmt::IfElse {
+        expr,
+        branch1,
+        branch0,
+      } => {
+        // Eval on the current block
+        let cond = KoopaGen::gen_on_exp(&expr, ctx);
+        let true_bb = ctx.new_bb(format!("%br-1-{}", branch1.name()));
+        let sink_bb = ctx.new_bb(format!("%if-sink-{}", stmt.name()));
+
+        if let Some(branch0) = branch0 {
+          let false_bb = ctx.new_bb(format!("%br-0-{}", branch0.name()));
+          let branch = ctx.new_local_value().branch(cond, true_bb, false_bb);
+          ctx.append_ins(branch);
+
+          ctx.upd_bb(false_bb);
+          KoopaGen::gen_on_block(&branch0, ctx);
+          // now ctx.bb is branch0 sink bb.
+          if ctx.bb.is_some() {
+            let jump = ctx.new_local_value().jump(sink_bb);
+            ctx.append_ins(jump);
+          }
+        } else {
+          let branch = ctx.new_local_value().branch(cond, true_bb, sink_bb);
+          ctx.append_ins(branch);
+        }
+
+        ctx.upd_bb(true_bb);
+        KoopaGen::gen_on_block(&branch1, ctx);
+        // now ctx.bb is branch1 sink bb.
+        if ctx.bb.is_some() {
+          let jump = ctx.new_local_value().jump(sink_bb);
+          ctx.append_ins(jump);
+        }
+
+        ctx.upd_bb(sink_bb);
+      }
+      ast::Stmt::While {
+        expr,
+        block,
+        cond_bb,
+        end_bb,
+      } => {
+        let cond_bb = ctx.new_bb(format!("%while-cond-{}", stmt.name()));
+        let body_bb = ctx.new_bb(format!("%while-body-{}", stmt.name()));
+        let end_bb = ctx.new_bb(format!("%while-end-{}", stmt.name()));
+
+        // update AST stored data, for future break and continue.
+        ast_data_write_as!(stmt, Stmt, |stmt| {
+          if let ast::Stmt::While {
+            expr,
+            block,
+            cond_bb: cond_bb_ref,
+            end_bb: end_bb_ref,
+          } = stmt
+          {
+            *cond_bb_ref = Some(cond_bb);
+            *end_bb_ref = Some(end_bb);
+          } else {
+            panic!("Invalid Stmt type");
+          }
+        });
+
+        let jump = ctx.new_local_value().jump(cond_bb);
+        ctx.append_ins(jump);
+
+        ctx.upd_bb(cond_bb);
+        let cond = KoopaGen::gen_on_exp(&expr, ctx);
+        let branch = ctx.new_local_value().branch(cond, body_bb, end_bb);
+        ctx.append_ins(branch);
+
+        ctx.upd_bb(body_bb);
+        KoopaGen::gen_on_block(&block, ctx);
+        // now ctx.bb is body sink bb.
+        if ctx.bb.is_some() {
+          let jump = ctx.new_local_value().jump(cond_bb);
+          ctx.append_ins(jump);
+        }
+
+        ctx.upd_bb(end_bb);
+      }
+      ast::Stmt::Break => {
+        let while_stmt = stmt.get_nearest_while().unwrap();
+        if let ast::Stmt::While { end_bb, .. } = while_stmt.get_ast_data().into_stmt() {
+          let jump = ctx.new_local_value().jump(end_bb.unwrap());
+          ctx.append_ins(jump);
+          ctx.bb = None;
+        } else {
+          panic!("Invalid Stmt type for break");
+        }
+      }
+      ast::Stmt::Continue => {
+        let while_stmt = stmt.get_nearest_while().unwrap();
+        if let ast::Stmt::While { cond_bb, .. } = while_stmt.get_ast_data().into_stmt() {
+          let jump = ctx.new_local_value().jump(cond_bb.unwrap());
+          ctx.append_ins(jump);
+          ctx.bb = None;
+        } else {
+          panic!("Invalid Stmt type for continue");
+        }
+      }
+      ast::Stmt::Return(exp) => {
+        if let Some(exp) = exp {
+          let ret = KoopaGen::gen_on_exp(&exp, ctx);
+          let ret_inst = ctx.new_local_value().ret(Some(ret));
+          ctx.append_ins(ret_inst);
+        } else {
+          let ret_inst = ctx.new_local_value().ret(None);
+          ctx.append_ins(ret_inst);
+        }
+        ctx.bb = None;
+      }
+    }
+  }
+
+  /// Generate Koopa on a Sys-Y LVal.
+  /// Return a Value whose type is ptr, or i32 if required.
+  ///
+  /// FunctionRParams is a special case, it will be handled mauanlly in other place.
+  /// Partial deref is impossible.
+  fn gen_on_lval(lval: &AstNodeId, ctx: &mut KoopaGenCtx<'_>, want_i32: bool) -> Value {
+    let lval_data = lval.get_ast_data().into_lval();
+    let sym_entry = lval
+      .lookup_sym_table(&SymIdent::Value(lval_data.ident.clone()))
+      .unwrap();
+
+    let ret_ptr = match sym_entry.kind {
+      SymTableEntryData::FuncDef(_) => panic!("Function is not a LVal"),
+      SymTableEntryData::ConstIntDef(_) => panic!("Const int is not a LVal"),
+      SymTableEntryData::VarIntDef(alloc) => alloc,
+      SymTableEntryData::ArrayDef(mut alloc, ty) => {
+        // Partial deref is impossible.
+        // a[3][5][7]
+        // middle value:
+        // a ==> *[[[i32, 7], 5], 3]
+        // a[1] ==> *[[i32, 7], 5]
+        // a[1][2] ==> *[i32, 7]
+        // a[1][2][3] ==> *i32
+
+        for i in lval_data.idx {
+          let idx = KoopaGen::gen_on_exp(&i, ctx);
+          alloc = ctx.new_local_value().get_elem_ptr(alloc, idx);
+          ctx.append_ins(alloc);
+        }
+
+        alloc
+      }
+      SymTableEntryData::FuncParamArrayDef(mut alloc, ty) => {
+        // int a[][3][5] means *[[i32, 5], 3] in Koopa
+        // the first dimension we use getptr, and them getelemptr.
+        // Partial deref is impossible.
+        //
+        // a[][5][7]
+        // middle value:
+        // a ==> *[[i32, 7], 5]
+        // a[1] ==> *[[i32, 7], 5] (special)
+        //
+        // a[1][2] ==> *[i32, 7]
+        // a[1][2][3] ==> *i32
+
+        assert!(lval_data.idx.len() >= 1, "Invalid FuncParamArrayDef");
+
+        let fisrt_dim = KoopaGen::gen_on_exp(&lval_data.idx[0], ctx);
+        alloc = ctx.new_local_value().get_ptr(alloc, fisrt_dim);
+        ctx.append_ins(alloc);
+
+        for i in lval_data.idx[1..].iter() {
+          let idx = KoopaGen::gen_on_exp(&i, ctx);
+          alloc = ctx.new_local_value().get_elem_ptr(alloc, idx);
+          ctx.append_ins(alloc);
+        }
+
+        alloc
+      }
+    };
+
+    if want_i32 == false {
+      return ret_ptr;
+    } else {
+      let load = ctx.new_local_value().load(ret_ptr);
+      ctx.append_ins(load);
+      return load;
+    }
+  }
+
+  fn gen_on_exp(exp: &AstNodeId, ctx: &mut KoopaGenCtx<'_>) -> Value {
+    return Self::gen_on_binary_exp(&exp.get_ast_data().into_exp().l_or_exp, ctx);
+  }
+
+  fn gen_on_unary_exp(exp: &AstNodeId, ctx: &mut KoopaGenCtx<'_>) -> Value {
+    match exp.get_ast_data().into_unary_exp() {
+      ast::UnaryExp::PrimaryExp { pexp } => {
+        return KoopaGen::gen_on_primary_exp(&pexp, ctx);
+      }
+      ast::UnaryExp::Call { ident, params } => {
+        let args = KoopaGen::gen_on_func_rparams(&params, ctx);
+        let func = exp
+          .lookup_sym_table(&SymIdent::Func(ident.clone()))
+          .unwrap();
+        match func.kind {
+          SymTableEntryData::FuncDef(f) => {
+            let call = ctx.new_local_value().call(f, args);
+            ctx.append_ins(call);
+            return call;
+          }
+          SymTableEntryData::VarIntDef(_)
+          | SymTableEntryData::ConstIntDef(_)
+          | SymTableEntryData::ArrayDef(_, _)
+          | SymTableEntryData::FuncParamArrayDef(_, _) => {
+            panic!("Invalid function call");
+          }
+        }
+      }
+      ast::UnaryExp::Unary { op, exp } => {
+        let sub_exp = KoopaGen::gen_on_unary_exp(&exp, ctx);
+        let zero = ctx.new_local_value().integer(0);
+
+        let binary = match op {
+          UnaryOp::Pos => None,
+          UnaryOp::Neg => Some(ctx.new_local_value().binary(
+            koopa::ir::BinaryOp::Sub,
+            zero,
+            sub_exp,
+          )),
+          UnaryOp::Not => Some(ctx.new_local_value().binary(
+            koopa::ir::BinaryOp::Eq,
+            zero,
+            sub_exp,
+          )),
+        };
+
+        if let Some(binary) = binary {
+          ctx.append_ins(binary);
+          return binary;
+        } else {
+          return sub_exp;
+        }
+      }
+    }
+  }
+
+  fn gen_on_binary_exp(exp: &AstNodeId, ctx: &mut KoopaGenCtx<'_>) -> Value {
+    match exp.get_ast_data().into_binary_exp() {
+      ast::BinaryExp::Unary { exp } => {
+        return KoopaGen::gen_on_unary_exp(&exp, ctx);
+      }
+      ast::BinaryExp::Binary { lhs, op, rhs } => {
+        match op {
+          BinaryOp::Add
+          | BinaryOp::Sub
+          | BinaryOp::Mul
+          | BinaryOp::Div
+          | BinaryOp::Mod
+          | BinaryOp::Lt
+          | BinaryOp::Le
+          | BinaryOp::Gt
+          | BinaryOp::Ge
+          | BinaryOp::Eq
+          | BinaryOp::Ne => {
+            let lhs = KoopaGen::gen_on_binary_exp(&lhs, ctx);
+            let rhs = if ast_is!(&rhs, BinaryExp) {
+              KoopaGen::gen_on_binary_exp(&rhs, ctx)
+            } else {
+              KoopaGen::gen_on_unary_exp(&rhs, ctx)
+            };
+            let binary = ctx.new_local_value().binary(op.to_koopa_op(), lhs, rhs);
+            ctx.append_ins(binary);
+            return binary;
+          }
+          BinaryOp::And => {
+            let zero = ctx.new_local_value().integer(0);
+            let lhs_v = KoopaGen::gen_on_binary_exp(&lhs, ctx);
+            let temp_alloc = ctx.new_local_value().alloc(Type::get_i32());
+            let default_store_0 = ctx.new_local_value().store(zero, temp_alloc);
+            ctx.insts_mut().extend([temp_alloc, default_store_0]);
+
+            let rhs_bb = ctx.new_bb("%and-rhs".to_string());
+            let sink_bb = ctx.new_bb("%and-sink".to_string());
+
+            let branch = ctx.new_local_value().branch(lhs_v, rhs_bb, sink_bb);
+            ctx.append_ins(branch);
+
+            ctx.upd_bb(rhs_bb);
+
+            let rhs_v = if ast_is!(&rhs, BinaryExp) {
+              KoopaGen::gen_on_binary_exp(&rhs, ctx)
+            } else {
+              KoopaGen::gen_on_unary_exp(&rhs, ctx)
+            };
+
+            let rhs_converted =
+              ctx
+                .new_local_value()
+                .binary(koopa::ir::BinaryOp::NotEq, zero, rhs_v);
+            let store_rhs = ctx.new_local_value().store(rhs_converted, temp_alloc);
+            let jump = ctx.new_local_value().jump(sink_bb);
+            ctx.insts_mut().extend([rhs_converted, store_rhs, jump]);
+
+            ctx.upd_bb(sink_bb);
+
+            let load = ctx.new_local_value().load(temp_alloc);
+            ctx.append_ins(load);
+            return load;
+          }
+          BinaryOp::Or => {
+            let one = ctx.new_local_value().integer(1);
+            let temp_alloc = ctx.new_local_value().alloc(Type::get_i32());
+            let default_store_1 = ctx.new_local_value().store(one, temp_alloc);
+            ctx.insts_mut().extend([temp_alloc, default_store_1]);
+
+            let rhs_bb = ctx.new_bb("%or-rhs".to_string());
+            let sink_bb = ctx.new_bb("%or-sink".to_string());
+
+            let lhs_v = KoopaGen::gen_on_binary_exp(&lhs, ctx);
+            let branch = ctx.new_local_value().branch(lhs_v, sink_bb, rhs_bb);
+            ctx.append_ins(branch);
+
+            ctx.upd_bb(rhs_bb);
+
+            let rhs_v = if ast_is!(&rhs, BinaryExp) {
+              KoopaGen::gen_on_binary_exp(&rhs, ctx)
+            } else {
+              KoopaGen::gen_on_unary_exp(&rhs, ctx)
+            };
+
+            let zero = ctx.new_local_value().integer(0);
+            let rhs_converted =
+              ctx
+                .new_local_value()
+                .binary(koopa::ir::BinaryOp::NotEq, zero, rhs_v);
+            let store_lhs = ctx.new_local_value().store(rhs_converted, temp_alloc);
+            let jump = ctx.new_local_value().jump(sink_bb);
+            ctx.insts_mut().extend([rhs_converted, store_lhs, jump]);
+
+            ctx.upd_bb(sink_bb);
+
+            let load = ctx.new_local_value().load(temp_alloc);
+            ctx.append_ins(load);
+            return load;
+          }
+        };
+      }
+    }
+  }
+
+  fn gen_on_primary_exp(pexp: &AstNodeId, ctx: &mut KoopaGenCtx<'_>) -> Value {
+    match pexp.get_ast_data().into_primary_exp() {
+      ast::PrimaryExp::Exp(exp) => {
+        return KoopaGen::gen_on_exp(&exp, ctx);
+      }
+      ast::PrimaryExp::LVal(lval) => {
+        return KoopaGen::gen_on_lval(&lval, ctx, true);
+      }
+      ast::PrimaryExp::Number(x) => {
+        return ctx.new_local_value().integer(x);
+      }
+    }
+  }
+
+  fn gen_on_func_rparams(params: &AstNodeId, ctx: &mut KoopaGenCtx<'_>) -> Vec<Value> {
+    let data = params.get_ast_data().into_func_r_params();
+
+    let mut args = vec![];
+    for p in data.params {
+      let exp = p.get_ast_data().into_exp();
+      let mut value = None;
+
+      // special case: array parameter.
+      if let Some(lval) = exp.is_pure_lval() {
+        let lval = lval.get_ast_data().into_lval();
+        let sym_entry = p.lookup_sym_table(&SymIdent::Value(lval.ident)).unwrap();
+
+        // is it array? func_array (no 1st dim info), or normal array?
+        match sym_entry.kind {
+          SymTableEntryData::FuncDef(_) => panic!("Function is not a LVal"),
+          SymTableEntryData::ConstIntDef(_) => {}
+          SymTableEntryData::VarIntDef(alloc) => {}
+          SymTableEntryData::ArrayDef(mut alloc, _) => {
+            // int a[3][5] means *[[i32, 5], 3] in Koopa
+            // a, we should get *[i32, 5]
+            // a[1], we should get *i32
+            // a[1][2], we should get i32.
+
+            // use getelemptr to deref
+            for i in lval.idx {
+              let idx = KoopaGen::gen_on_exp(&i, ctx);
+              alloc = ctx.new_local_value().get_elem_ptr(alloc, idx);
+              ctx.append_ins(alloc);
+            }
+
+            // now middle value:
+            // a ==> *[[i32, 5], 3]
+            // a[1] ==> *[i32, 5]
+            // a[1][2] ==> *i32
+
+            // an extra getelemptr is needed.
+            // for example, a[2] we will get a ptr to [i32, 5]. But for func array args, we need *i32 actually.
+
+            let zero = ctx.new_local_value().integer(0);
+            let extra_get_elem_ptr = ctx.new_local_value().get_elem_ptr(alloc, zero);
+            ctx.append_ins(extra_get_elem_ptr);
+
+            value = Some(extra_get_elem_ptr);
+          }
+          SymTableEntryData::FuncParamArrayDef(mut alloc, _) => {
+            // int a[][5] means *[i32, 5] in Koopa
+            // a, we should get *[i32, 5]
+            // a[1], we should get *i32
+            // a[1][2], we don't handle it here.
+
+            // first we nedd to see whether it's a partial deref, or full deref.
+            // apply following code on full deref will cause panic.
+
+            let mut inner_ty = ctx.dfg_mut().value(alloc).ty().ptr_inner();
+            let shape_without_1dim = inner_ty.get_array_shape();
+
+            // see if it's a deref
+
+            if lval.idx.len() < shape_without_1dim.len() + 1 {
+              for i in lval.idx {
+                let idx = KoopaGen::gen_on_exp(&i, ctx);
+                alloc = ctx.new_local_value().get_elem_ptr(alloc, idx);
+                ctx.append_ins(alloc);
+              }
+
+              // now alloc value:
+              // a ==> *[i32, 5]
+              // a[1] ==> *i32
+
+              value = Some(alloc);
+            }
+          }
+        };
+      }
+
+      if value.is_none() {
+        args.push(KoopaGen::gen_on_exp(&p, ctx));
+      } else {
+        args.push(value.unwrap());
+      }
+    }
+    args
   }
 }
 
@@ -619,7 +1108,7 @@ impl<'a> AggregateBuilder<'a> {
     }
   }
 
-  fn reduce(&mut self, val_src: &mut Program) {
+  fn reduce(&mut self, prog: &mut Program) {
     let last_size = self.stack.last().unwrap().0;
     let same_size_cnt = self
       .stack
@@ -635,30 +1124,144 @@ impl<'a> AggregateBuilder<'a> {
         .drain(self.stack.len() - same_size_cnt..)
         .map(|(_, _, val)| val)
         .collect();
-      let aggre = val_src.new_value().aggregate(elems);
+      let aggre = prog.new_value().aggregate(elems);
       self.stack.push((
         last_size * same_size_cnt as i32,
         stack_top_start_dim - 1,
         aggre,
       ));
 
-      self.reduce(val_src)
+      self.reduce(prog)
     }
   }
 
-  fn push_single(&mut self, val: Value, val_src: &mut Program) {
+  fn push_single(&mut self, val: Value, prog: &mut Program) {
     self.checker.append_single();
     self.stack.push((1, self.expected_shape.len(), val));
-    self.reduce(val_src);
+    self.reduce(prog);
   }
 
-  fn push_sequence(&mut self, val: Value, val_src: &mut Program) {
+  fn push_sequence(&mut self, val: Value, prog: &mut Program) {
     let sub_seq = self.checker.append_sequence(false);
     self.stack.push((
       sub_seq.iter().product(),
       self.expected_shape.len() - sub_seq.len(),
       val,
     ));
-    self.reduce(val_src)
+    self.reduce(prog)
+  }
+}
+
+struct KoopaGenCtx<'a> {
+  prog: &'a mut Program,
+  func: Option<Function>,
+  bb: Option<BasicBlock>,
+}
+
+impl<'a> KoopaGenCtx<'a> {
+  fn new(prog: &'a mut Program) -> Self {
+    Self {
+      prog,
+      func: None,
+      bb: None,
+    }
+  }
+
+  fn is_global(&self) -> bool {
+    self.func.is_none()
+  }
+
+  fn prog_mut(&mut self) -> &mut Program {
+    self.prog
+  }
+
+  fn func_data_mut(&mut self) -> &mut FunctionData {
+    self.prog.func_mut(self.func.unwrap())
+  }
+
+  // fn bb_data_mut(&mut self) -> &mut BasicBlockData {
+  //   self
+  //     .prog
+  //     .func_mut(self.func.unwrap())
+  //     .dfg_mut()
+  //     .bb_mut(self.bb.unwrap())
+  // }
+
+  fn insts_mut(&mut self) -> &mut InstList {
+    self
+      .prog
+      .func_mut(self.func.unwrap())
+      .layout_mut()
+      .bb_mut(self.bb.unwrap())
+      .insts_mut()
+  }
+
+  fn append_ins(&mut self, ins: Value) {
+    self.insts_mut().extend([ins]);
+  }
+
+  fn dfg_mut(&mut self) -> &mut DataFlowGraph {
+    self.func_data_mut().dfg_mut()
+  }
+
+  fn new_local_value(&mut self) -> LocalBuilder<'_> {
+    self.dfg_mut().new_value()
+  }
+
+  fn func_handle(&self) -> Option<Function> {
+    self.func
+  }
+
+  fn current_bb(&self) -> BasicBlock {
+    self.bb.unwrap()
+  }
+
+  fn new_bb(&mut self, name: String) -> BasicBlock {
+    let bb = self
+      .func_data_mut()
+      .dfg_mut()
+      .new_bb()
+      .basic_block(Some(name));
+    self.func_data_mut().layout_mut().bbs_mut().extend([bb]);
+    bb
+  }
+
+  fn upd_bb(&mut self, bb: BasicBlock) -> &mut Self {
+    self.bb = Some(bb);
+    self
+  }
+}
+
+trait GetArrayShape {
+  fn ptr_inner(&self) -> Type;
+  fn get_array_shape(&self) -> Vec<i32>;
+}
+
+impl GetArrayShape for Type {
+  /// it will return vec![] for i32
+  fn get_array_shape(&self) -> Vec<i32> {
+    let mut shape = vec![];
+    let mut tmp = Some(self);
+
+    while let Some(inner) = tmp {
+      match inner.kind() {
+        ir::TypeKind::Array(sub_type, size) => {
+          tmp = Some(sub_type);
+          shape.push(*size as i32);
+        }
+        ir::TypeKind::Int32 => {
+          tmp = None;
+        }
+        _ => panic!("Not an array or i32"),
+      }
+    }
+    shape
+  }
+
+  fn ptr_inner(&self) -> Type {
+    match self.kind() {
+      ir::TypeKind::Pointer(inner) => *inner,
+      _ => panic!("Not a ptr"),
+    }
   }
 }

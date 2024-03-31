@@ -78,6 +78,7 @@ impl UuidOwner for SymbolTable {
   }
 }
 
+#[derive(Clone)]
 pub struct SymTableEntry {
   pub symbol: SymIdent,
 
@@ -97,6 +98,7 @@ impl SymTableEntry {
   }
 }
 
+#[derive(Clone)]
 pub enum SymTableEntryData {
   FuncDef(Function),
 
@@ -160,6 +162,24 @@ impl AstNodeId {
     SYMBOLS.with_borrow_mut(|sym_tables| {
       sym_tables.register(table);
     })
+  }
+
+  pub fn lookup_sym_table(&self, ident: &SymIdent) -> Option<SymTableEntry> {
+    let tables = self.all_sym_tables();
+    for table in tables {
+      let entry = sym_tables_read(&table, |table| {
+        let query = table.get_entry(ident);
+        if let Some(entry) = query {
+          return Some(entry.clone());
+        } else {
+          return None;
+        }
+      });
+      if entry.is_some() {
+        return entry;
+      }
+    }
+    None
   }
 
   /// Get all tables on the stack.

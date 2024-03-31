@@ -1,4 +1,7 @@
-use std::{default, fmt::Formatter};
+use std::{
+  default,
+  fmt::{Debug, Formatter},
+};
 
 use crate::{define_wrapper, global_mapper, sym_table::SymIdent, utils::dfs::TreeId};
 use koopa::ir::BasicBlock;
@@ -12,17 +15,16 @@ use crate::utils::uuid_mapper::UuidOwner;
 macro_rules! ast_is {
   ($node_id:expr, $variant:ident) => {
     ast_nodes_read($node_id, |node| {
-      matches!(&node.ast, ast::AstData::$variant(_))
+      matches!(&node.ast, crate::ast::AstData::$variant(_))
     })
-    .unwrap()
   };
 }
 
-/// Convert an &mut AstNode into &mut AstData::$variant
+/// Convert an &mut AstNode into &AstData::$variant
 #[macro_export]
 macro_rules! ast_node_into {
   ($node:expr, $variant:ident) => {
-    if let ast::AstData::$variant(data) = &mut $node.ast {
+    if let crate::ast::AstData::$variant(data) = &$node.ast {
       data
     } else {
       panic!("ast_node_into!() failed")
@@ -34,7 +36,7 @@ macro_rules! ast_node_into {
 #[macro_export]
 macro_rules! ast_into {
   ($node_id:expr, $variant:ident) => {
-    ast_nodes_read($node_id, |node| ast_node_into!(node, $variant).clone()).unwrap()
+    ast_nodes_read($node_id, |node| ast_node_into!(node, $variant).clone())
   };
 }
 
@@ -74,6 +76,56 @@ global_mapper!(
 );
 
 impl AstNodeId {
+  pub fn get_nearest_while(&self) -> Option<AstNodeId> {
+    let mut cur = Some(self.clone());
+    while let Some(node) = cur {
+      if ast_is!(&node, Stmt) {
+        let stmt = ast_into!(&node, Stmt);
+        if let Stmt::While { .. } = stmt {
+          return Some(node);
+        }
+      }
+      cur = node.get_parent();
+    }
+    None
+  }
+
+  pub fn tree_to_string(&self, human_friendly: bool) -> String {
+    // use dfs visitor
+    let res = std::cell::RefCell::new(String::new());
+    let depth = std::cell::RefCell::new(0);
+    let visitor = crate::utils::dfs::DfsVisitor::<_, _, AstNodeId>::new(
+      |node| {
+        *depth.borrow_mut() += 1;
+        let data = node.get_ast_data();
+        let mut res = res.borrow_mut();
+        if human_friendly {
+          res.push_str(&format!("{}{:?} {{\n", "  ".repeat(*depth.borrow()), data));
+        } else {
+          res.push_str(&format!("{:?} {{", data));
+        }
+
+        Ok(())
+      },
+      |_| {
+        let mut res = res.borrow_mut();
+        if human_friendly {
+          res.push_str(&format!("{}}}\n", "  ".repeat(*depth.borrow())));
+        } else {
+          res.push_str("}");
+        }
+        *depth.borrow_mut() -= 1;
+        Ok(())
+      },
+    );
+    visitor.dfs(self).unwrap();
+    res.take()
+  }
+
+  pub fn name(&self) -> String {
+    self.0.to_string()
+  }
+
   pub fn is_array(&self) -> bool {
     match self.get_ast_data() {
       AstData::CompUnit(_) => false,
@@ -354,7 +406,7 @@ pub enum Stmt {
     /// [AstData::Stmt]
     block: AstNodeId,
     cond_bb: Option<BasicBlock>,
-    next_bb: Option<BasicBlock>,
+    end_bb: Option<BasicBlock>,
   },
   Break,
   Continue,
@@ -364,9 +416,31 @@ pub enum Stmt {
 
 #[derive(Debug, Clone)]
 pub struct Exp {
-  /// [AstData::LOrExp]
+  /// [AstData::BinaryExp]
   pub l_or_exp: AstNodeId,
-  pub const_value: Option<i32>,
+}
+impl Exp {
+  /// Return [AstData::LVal] if the expression is a pure lvalue
+  pub(crate) fn is_pure_lval(&self) -> Option<AstNodeId> {
+    // the only case we will recognize:
+    // Exp -> BinaryExp -> UnaryExp -> PrimaryExp -> LVal
+    match self.l_or_exp.get_ast_data().into_binary_exp() {
+      BinaryExp::Unary { exp } => {
+        let exp = exp.get_ast_data().into_unary_exp();
+        match exp {
+          UnaryExp::PrimaryExp { pexp } => {
+            let pexp = pexp.get_ast_data().into_primary_exp();
+            match pexp {
+              PrimaryExp::LVal(lval) => Some(lval),
+              _ => None,
+            }
+          }
+          _ => None,
+        }
+      }
+      BinaryExp::Binary { lhs, op, rhs } => None,
+    }
+  }
 }
 
 #[derive(Debug, Clone)]
@@ -571,6 +645,24 @@ impl BinaryOp {
       }
     }
   }
+
+  pub fn to_koopa_op(&self) -> koopa::ir::BinaryOp {
+    match self {
+      BinaryOp::Add => koopa::ir::BinaryOp::Add,
+      BinaryOp::Sub => koopa::ir::BinaryOp::Sub,
+      BinaryOp::Mul => koopa::ir::BinaryOp::Mul,
+      BinaryOp::Div => koopa::ir::BinaryOp::Div,
+      BinaryOp::Mod => koopa::ir::BinaryOp::Mod,
+      BinaryOp::Lt => koopa::ir::BinaryOp::Lt,
+      BinaryOp::Le => koopa::ir::BinaryOp::Le,
+      BinaryOp::Gt => koopa::ir::BinaryOp::Gt,
+      BinaryOp::Ge => koopa::ir::BinaryOp::Ge,
+      BinaryOp::Eq => koopa::ir::BinaryOp::Eq,
+      BinaryOp::Ne => koopa::ir::BinaryOp::NotEq,
+      BinaryOp::And => koopa::ir::BinaryOp::And,
+      BinaryOp::Or => koopa::ir::BinaryOp::Or,
+    }
+  }
 }
 
 #[derive(Debug, Clone)]
@@ -592,40 +684,6 @@ impl TreeId for AstNodeId {
   /// Panic if the AstNodeId does not exist.
   fn get_childrens(&self) -> Vec<AstNodeId> {
     ast_nodes_read(&self.0, |node| node.ast.get_childrens())
-  }
-}
-
-impl AstNodeId {
-  pub fn to_string(&self, human_friendly: bool) -> String {
-    // use dfs visitor
-    let res = std::cell::RefCell::new(String::new());
-    let depth = std::cell::RefCell::new(0);
-    let visitor = crate::utils::dfs::DfsVisitor::<_, _, AstNodeId>::new(
-      |node| {
-        *depth.borrow_mut() += 1;
-        let data = node.get_ast_data();
-        let mut res = res.borrow_mut();
-        if human_friendly {
-          res.push_str(&format!("{}{:?} {{\n", "  ".repeat(*depth.borrow()), data));
-        } else {
-          res.push_str(&format!("{:?} {{", data));
-        }
-
-        Ok(())
-      },
-      |_| {
-        let mut res = res.borrow_mut();
-        if human_friendly {
-          res.push_str(&format!("{}}}\n", "  ".repeat(*depth.borrow())));
-        } else {
-          res.push_str("}");
-        }
-        *depth.borrow_mut() -= 1;
-        Ok(())
-      },
-    );
-    visitor.dfs(self).unwrap();
-    res.take()
   }
 }
 
@@ -801,7 +859,7 @@ impl AstNode {
       expr,
       block,
       cond_bb: None,
-      next_bb: None,
+      end_bb: None,
     });
     AstNode::register(AstNode::new(ast))
   }
@@ -822,10 +880,7 @@ impl AstNode {
   }
 
   pub fn new_exp(l_or_exp: AstNodeId) -> AstNodeId {
-    let ast = AstData::Exp(Exp {
-      l_or_exp,
-      const_value: None,
-    });
+    let ast = AstData::Exp(Exp { l_or_exp });
     AstNode::register(AstNode::new(ast))
   }
 
