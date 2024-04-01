@@ -149,29 +149,25 @@
 //! }
 
 use koopa::ir::builder::{
-  BasicBlockBuilder, GlobalBuilder, GlobalInstBuilder, LocalBuilder, LocalInstBuilder,
-  ValueBuilder, ValueInserter,
+  BasicBlockBuilder, GlobalInstBuilder, LocalBuilder, LocalInstBuilder, ValueBuilder,
 };
 use koopa::ir::dfg::DataFlowGraph;
-use koopa::ir::entities::BasicBlockData;
-use koopa::ir::layout::{InstList, Layout};
-use koopa::ir::values::GetElemPtr;
+
+use koopa::ir::layout::InstList;
+
 use koopa::ir::{self, BasicBlock, Function, FunctionData, Program, Type, Value};
 
-use crate::ast::{
-  AstData, AstNode, AstNodeId, BinaryOp, ConstInitVal, Decl, FuncFParam, InitVal, UnaryOp,
-};
+use crate::ast::{AstData, AstNodeId, BinaryOp, ConstInitVal, FuncFParam, InitVal, UnaryOp};
 use crate::ast_data_write_as;
 use crate::sym_table::{SymIdent, SymTableEntry, SymTableEntryData};
-use crate::utils::dfs::{DfsVisitor, TreeId};
-use crate::utils::Res;
+
 use crate::{ast, ast::ast_nodes_read, ast::ast_nodes_write, ast_is};
 
 pub struct KoopaGen;
 
 impl KoopaGen {
   /// Eval all compile-time constant int. (except const array deref)
-  fn eval_const_int(ast_id: &AstNodeId) -> i32 {
+  pub fn eval_const_int(ast_id: &AstNodeId) -> i32 {
     let ast_data = ast_id.get_ast_data();
     match ast_data {
       ast::AstData::Exp(exp) => {
@@ -250,17 +246,15 @@ impl KoopaGen {
 
     for item in comp_unit.items {
       match item.get_ast_data() {
-        ast::AstData::Decl(decl) => match decl {
-          ast::Decl::ConstDecl(decl) | ast::Decl::VarDecl(decl) => {
-            KoopaGen::gen_on_decl(&decl, &mut ctx);
-          }
-        },
+        ast::AstData::Decl(_) => KoopaGen::gen_on_decl(&item, &mut ctx),
         ast::AstData::FuncDef(func_def) => {
+          item.create_symbol_table(); // For function parameters.
+
           // generate the entry basic block, and put all initialized values into the symbol table.
           let params = KoopaGen::gen_on_func_fparams(&func_def.func_f_params);
 
           let func = ctx.prog_mut().new_func(FunctionData::with_param_names(
-            func_def.ident.clone(),
+            format!("@{}", func_def.ident),
             params.clone(),
             match func_def.has_retval {
               true => Type::get_i32(),
@@ -419,6 +413,8 @@ impl KoopaGen {
   /// When it returns, the current block in ctx is the sink block.
   ///
   fn gen_on_block(ast_id: &AstNodeId, ctx: &mut KoopaGenCtx) {
+    ast_id.create_symbol_table(); // block symbol tables.
+
     let data = ast_id.get_ast_data().into_block();
 
     for item in data.items {
@@ -641,8 +637,8 @@ impl KoopaGen {
       ast::Stmt::While {
         expr,
         block,
-        cond_bb,
-        end_bb,
+        cond_bb: _,
+        end_bb: _,
       } => {
         let cond_bb = ctx.new_bb(format!("%while-cond-{}", stmt.name()));
         let body_bb = ctx.new_bb(format!("%while-body-{}", stmt.name()));
@@ -651,8 +647,8 @@ impl KoopaGen {
         // update AST stored data, for future break and continue.
         ast_data_write_as!(stmt, Stmt, |stmt| {
           if let ast::Stmt::While {
-            expr,
-            block,
+            expr: _,
+            block: _,
             cond_bb: cond_bb_ref,
             end_bb: end_bb_ref,
           } = stmt
@@ -719,7 +715,7 @@ impl KoopaGen {
   /// Generate Koopa on a Sys-Y LVal.
   /// Return a Value whose type is ptr, or i32 if required.
   ///
-  /// FunctionRParams is a special case, it will be handled mauanlly in other place.
+  /// FunctionRParams is a special case, it will be handled mauanlly in gen_on_func_rparams.
   /// Partial deref is impossible.
   fn gen_on_lval(lval: &AstNodeId, ctx: &mut KoopaGenCtx<'_>, want_i32: bool) -> Value {
     let lval_data = lval.get_ast_data().into_lval();
@@ -729,9 +725,14 @@ impl KoopaGen {
 
     let ret_ptr = match sym_entry.kind {
       SymTableEntryData::FuncDef(_) => panic!("Function is not a LVal"),
-      SymTableEntryData::ConstIntDef(_) => panic!("Const int is not a LVal"),
+      SymTableEntryData::ConstIntDef(v) => {
+        assert!(want_i32 == true, "Try to get a ptr from a const int");
+
+        // Return directly instead of going down for deref.
+        return ctx.new_local_value().integer(v);
+      }
       SymTableEntryData::VarIntDef(alloc) => alloc,
-      SymTableEntryData::ArrayDef(mut alloc, ty) => {
+      SymTableEntryData::ArrayDef(mut alloc, _ty) => {
         // Partial deref is impossible.
         // a[3][5][7]
         // middle value:
@@ -748,7 +749,7 @@ impl KoopaGen {
 
         alloc
       }
-      SymTableEntryData::FuncParamArrayDef(mut alloc, ty) => {
+      SymTableEntryData::FuncParamArrayDef(mut alloc, _ty) => {
         // int a[][3][5] means *[[i32, 5], 3] in Koopa
         // the first dimension we use getptr, and them getelemptr.
         // Partial deref is impossible.
@@ -977,7 +978,7 @@ impl KoopaGen {
         match sym_entry.kind {
           SymTableEntryData::FuncDef(_) => panic!("Function is not a LVal"),
           SymTableEntryData::ConstIntDef(_) => {}
-          SymTableEntryData::VarIntDef(alloc) => {}
+          SymTableEntryData::VarIntDef(_alloc) => {}
           SymTableEntryData::ArrayDef(mut alloc, _) => {
             // int a[3][5] means *[[i32, 5], 3] in Koopa
             // a, we should get *[i32, 5]
@@ -1014,7 +1015,7 @@ impl KoopaGen {
             // first we nedd to see whether it's a partial deref, or full deref.
             // apply following code on full deref will cause panic.
 
-            let mut inner_ty = ctx.dfg_mut().value(alloc).ty().ptr_inner();
+            let inner_ty = ctx.dfg_mut().value(alloc).ty().ptr_inner();
             let shape_without_1dim = inner_ty.get_array_shape();
 
             // see if it's a deref
@@ -1064,10 +1065,10 @@ impl IntoType for [i32] {
 impl IntoType for FuncFParam {
   fn into_type(&self) -> Type {
     match self {
-      FuncFParam::Single { btype, ident } => Type::get_i32(),
+      FuncFParam::Single { btype: _, ident: _ } => Type::get_i32(),
       FuncFParam::Array {
-        btype,
-        ident,
+        btype: _,
+        ident: _,
         shape_no_first_dim,
       } => {
         let mut ty = Type::get_i32();
@@ -1111,6 +1112,7 @@ impl<'a> InitValChecker<'a> {
   }
 
   /// Return the last element that we reached, according to progress
+  #[allow(dead_code)]
   fn get_last_elem(&self) -> Vec<i32> {
     let mut last_elem = vec![];
     let mut progress = self.progress;
@@ -1308,6 +1310,7 @@ impl<'a> KoopaGenCtx<'a> {
     self.func
   }
 
+  #[allow(dead_code)]
   fn current_bb(&self) -> BasicBlock {
     self.bb.unwrap()
   }

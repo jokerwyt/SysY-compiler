@@ -1,6 +1,6 @@
 //! Symbol tables are associated with an AST node, and indexed by the AST node's AstNodeId.
 
-use koopa::ir::{Function, Type, TypeKind, Value};
+use koopa::ir::{Function, Type, Value};
 use uuid::Uuid;
 
 use crate::ast;
@@ -201,6 +201,7 @@ impl AstNodeId {
     tables.first().unwrap().clone()
   }
 
+  #[allow(dead_code)]
   fn global_sym_table(&self) -> SymTableId {
     let tables = self.all_sym_tables();
     tables.last().unwrap().clone()

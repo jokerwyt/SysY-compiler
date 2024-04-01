@@ -1,10 +1,12 @@
 mod pg;
 
 use clap::Parser;
+use koopa::back::KoopaGenerator;
 use lalrpop_util::lalrpop_mod;
 use std::fs::read_to_string;
 use std::io::Result;
 use sysy_compiler::ast::AstNodeId;
+use sysy_compiler::koopa_gen::KoopaGen;
 
 lalrpop_mod!(sysy);
 
@@ -26,20 +28,27 @@ fn main() -> Result<()> {
   let args = Cli::parse();
 
   let input = args.input;
-  let _output = args.output;
+  let output = args.output;
 
   let input = read_to_string(input)?;
 
-  let ast: AstNodeId = sysy::_CompUnitParser::new().parse(&input).unwrap();
+  let _ast: AstNodeId = sysy::_CompUnitParser::new().parse(&input).unwrap();
 
   // koopa IR generation
-  let _prog = koopa::ir::Program::new();
+  let prog = KoopaGen::gen_on_compile_unit(&_ast);
 
   if args.koopa.is_some() {
+    // Target Koopa
     assert!(args.riscv.is_none());
 
-    // compile my ast
+    let mut text_gen = KoopaGenerator::new(Vec::new());
+    text_gen.generate_on(&prog)?;
+    let text_form_ir = std::str::from_utf8(&text_gen.writer()).unwrap().to_string();
+
+    // print to the output file
+    std::fs::write(output, text_form_ir)?;
   } else {
+    // Target Riscv
   }
   Ok(())
 }

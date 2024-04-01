@@ -1,7 +1,4 @@
-use std::{
-  default,
-  fmt::{Debug, Formatter},
-};
+use std::fmt::{Debug, Formatter};
 
 use crate::{define_wrapper, global_mapper, sym_table::SymIdent, utils::dfs::TreeId};
 use koopa::ir::BasicBlock;
@@ -50,7 +47,6 @@ macro_rules! ast_data_read_as {
         panic!("ast_data_read_as!() failed")
       }
     })
-    .unwrap()
   };
 }
 
@@ -438,7 +434,11 @@ impl Exp {
           _ => None,
         }
       }
-      BinaryExp::Binary { lhs, op, rhs } => None,
+      BinaryExp::Binary {
+        lhs: _,
+        op: _,
+        rhs: _,
+      } => None,
     }
   }
 }
@@ -956,7 +956,11 @@ macro_rules! define_ast_data_into {
       if let AstData::$variant(c) = self {
         c
       } else {
-        panic!("AstData::into_$variant() failed")
+        panic!(
+          "AstData::into_$variant() failed. It is a {}, instead of {}",
+          self.get_variant_name(),
+          stringify!($variant),
+        )
       }
     }
   };
@@ -986,61 +990,32 @@ impl AstData {
   define_ast_data_into!(into_binary_exp, BinaryExp);
   define_ast_data_into!(into_const_exp, ConstExp);
 
-  // /// Get const value
-  // pub fn const_int(&self) -> i32 {
-  //   match self {
-  //     AstData::ConstInitVal(c_init_val) => match c_init_val {
-  //       ConstInitVal::Single(_, v) => *v,
-  //       ConstInitVal::Sequence(_) => None,
-  //     },
-  //     AstData::InitVal(InitVal::Single(_, v)) => *v,
-  //     AstData::Exp(exp) => match exp {
-  //       Exp { const_value, .. } => *const_value,
-  //     },
-  //     AstData::PrimaryExp(exp) => match exp {
-  //       PrimaryExp::Exp(_, v) => *v,
-  //       PrimaryExp::Number(v) => Some(*v),
-  //       PrimaryExp::LVal(_, v) => *v,
-  //     },
-  //     AstData::UnaryExp(exp) => match exp {
-  //       UnaryExp::PrimaryExp {
-  //         const_value: Some(v),
-  //         ..
-  //       }
-  //       | UnaryExp::Unary {
-  //         const_value: Some(v),
-  //         ..
-  //       } => Some(*v),
-  //       _ => None,
-  //     },
-  //     AstData::BinaryExp(exp) => match exp {
-  //       BinaryExp::Unary {
-  //         const_value: Some(v),
-  //         ..
-  //       }
-  //       | BinaryExp::Binary {
-  //         const_value: Some(v),
-  //         ..
-  //       } => Some(*v),
-  //       _ => None,
-  //     },
-  //     AstData::ConstExp(exp) => match exp {
-  //       ConstExp(_, Some(v)) => Some(*v),
-  //       _ => panic!(
-  //         "ConstExp {:?} is not evaluated when const_single_value()",
-  //         exp
-  //       ),
-  //     },
-  //     AstData::LVal(lval) => match lval {
-  //       LVal {
-  //         const_value: Some(v),
-  //         ..
-  //       } => Some(*v),
-  //       _ => None,
-  //     },
-  //     _ => None,
-  //   }
-  // }
+  pub fn get_variant_name(&self) -> String {
+    match self {
+      AstData::CompUnit(_) => "CompUnit".to_string(),
+      AstData::Decl(_) => "Decl".to_string(),
+      AstData::ConstDecl(_) => "ConstDecl".to_string(),
+      AstData::BType => "BType".to_string(),
+      AstData::ConstDef(_) => "ConstDef".to_string(),
+      AstData::ConstInitVal(_) => "ConstInitVal".to_string(),
+      AstData::VarDecl(_) => "VarDecl".to_string(),
+      AstData::VarDef(_) => "VarDef".to_string(),
+      AstData::InitVal(_) => "InitVal".to_string(),
+      AstData::FuncDef(_) => "FuncDef".to_string(),
+      AstData::FuncFParams(_) => "FuncFParams".to_string(),
+      AstData::FuncFParam(_) => "FuncFParam".to_string(),
+      AstData::Block(_) => "Block".to_string(),
+      AstData::BlockItem(_) => "BlockItem".to_string(),
+      AstData::Stmt(_) => "Stmt".to_string(),
+      AstData::Exp(_) => "Exp".to_string(),
+      AstData::LVal(_) => "LVal".to_string(),
+      AstData::PrimaryExp(_) => "PrimaryExp".to_string(),
+      AstData::UnaryExp(_) => "UnaryExp".to_string(),
+      AstData::FuncRParams(_) => "FuncRParams".to_string(),
+      AstData::BinaryExp(_) => "BinaryExp".to_string(),
+      AstData::ConstExp(_) => "ConstExp".to_string(),
+    }
+  }
 
   pub fn get_childrens(&self) -> Vec<AstNodeId> {
     match self {
