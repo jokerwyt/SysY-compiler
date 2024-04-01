@@ -1,152 +1,151 @@
-//! We implement the IR generation for the SysY language in this module.
-//! The comments here demonstrate how we pass the AST of Sys-Y and generate Koopa IR.
-//!
-//! pub enum AstData {
-//!   CompUnit(CompUnit),
-//!     Produces a [koopa::ir::Program].
-//!
-//!   Decl(Decl),
-//!     Takes a base BB.
-//!
-//!   ConstDecl(ConstDecl),
-//!     Takes a base BB.
-//!
-//!   BType,
-//!     Don't care.
-//!
-//!   ConstDef(ConstDef),
-//!     Takes a base BB if local. produces a [koopa::ir::Value].
-//!
-//!     If const int, it's an Integer.
-//!     If global const array, it's a ptr from GlobalAlloc initialized with Aggregate.
-//!     If local const array, it's a ptr from Alloc followed by Aggregate store initialization.
-//!
-//!     Stored into SymTableEntryData: IntDef or ArrayDef
-//!
-//!   ConstInitVal(ConstInitVal),
-//!     Produces Value::Int or Value::Aggregate.
-//!
-//!   VarDecl(VarDecl),
-//!     Takes a BB.
-//!
-//!   VarDef(VarDef),
-//!     Takes a BB, produces a [koopa::ir::Value].
-//!
-//!     If global [int|array], it's a ptr from GlobalAlloc initialized with Int or Aggregate,
-//!     If local [int|array], it's a ptr from Alloc followed by manual initialization.
-//!
-//!     Stored into SymTableEntryData: IntDef or ArrayDef
-//!
-//!   InitVal(InitVal),
-//!     If local, it takes a BB, a Value ptr from Alloc, and option shape, produces nothing
-//!     If Global, takes nothing and produces a Int or Aggregate.
-//!
-//!     If global initval:
-//!       It must be a Int / Aggregate after const_eval, and will be used in GlobalAlloc initialized.
-//!
-//!     If local initval:
-//!       We can suppose that every Value inside needs computation on the spot.
-//!       The ptr and shape will be transferred down for initializing.
-//!       The initialization will be done locally, and no side effect.
-//!
-//!   FuncDef(FuncDef),
-//!     Takes a [koopa::ir::Program], produces a [koopa::ir::Function].
-//!
-//!     Stored into SymTableEntryData: FuncDef
-//!
-//!   FuncFParams(FuncFParams),
-//!     Takes a BB.
-//!
-//!   FuncFParam(FuncFParam),
-//!     Takes the entry BB, produces a [koopa::ir::Value].
-//!     The FuncArgRef value provided by the function declaration will be copied into an
-//!     manually Alloc. The originall value will be discarded.
-//!
-//!     For int, it's a *i32 Value from Alloc.
-//!     For array, it's *[i32, 3] for int[][3] for example, also from Alloc.
-//!
-//!     The generated Value will be inserted into symbol table. IntDef / FuncParamArrayDef.
-//!
-//!
-//!   Block(Block),
-//!     Takes an entry BB, return the last BB.
-//!
-//!     When passing Block, the outside gives it the first bb and it will return the last
-//!     unclosed basic block. The control will continue on the next Values of that block.
-//!
-//!     The place the BB is generated is responsible for inserting it into DFG.
-//!
-//!   BlockItem(BlockItem),
-//!     Takes an entry BB, return the last BB.
-//!
-//!   Stmt(Stmt),
-//!     Takes an base BB, return an optional last BB.
-//!
-//!     IfElse Stmt:
-//!       The eval is placed at the base BB, and two BB called br1 and br0 will be
-//!       generated. Another empty block will be created as the last BB.
-//!
-//!     While Stmt:
-//!       At least basic blocks: cond, body, and another new "next block" as last BB.
-//!       Cond block and "last block" handle will be stored in AstData.
-//!
-//!     Break Stmt:
-//!       Find the nearest while and jump to its next block.
-//!       No last block.
-//!
-//!     Continue Stmt:
-//!       Jumps to the nearest while's cond block.
-//!       No last block.
-//!
-//!   Exp(Exp),
-//!     Takes a base BB, produces a [koopa::ir::Value].
-//!
-//!     We should first check if it's const. If it's, return an Integer Value directly.
-//!     Otherwise, it will be a ptr, or a i32.
-//!
-//!
-//!   LVal(LVal),
-//!     Takes a BB, produces a [koopa::ir::Value].
-//!     Ptr or i32.
-//!
-//!     Find the LVal in symbol tables, and consider cases:
-//!     1. for const int, it shoule be Int.
-//!     2. for other cases (const array, variable int, variable array), it's a ptr.
-//!
-//!     If it's an array deref, return the corresponding ptr type. (*i32, *[i32, 5], ...)
-//!     Partial deref and complete deref will be handled consitently.
-//!
-//!   PrimaryExp(PrimaryExp),
-//!     Takes a BB, produces a [koopa::ir::Value].
-//!
-//!     Ptr (for all LVal, some Exp),
-//!     or i32 (for all Number and some other Exp).
-//!
-//!   UnaryExp(UnaryExp),
-//!     Takes a BB, produces a [koopa::ir::Value].
-//!
-//!     For PrimaryExp, take the sub value.
-//!     For function call, the produced ValueKind is Call, and the type will be i32 or unit.
-//!     For arithmetic, check the sub UnaryExp:
-//!       1) if i32, then take the Value.
-//!       2) if ptr, then assert(*i32), and use Load to make it i32.
-//!
-//!
-//!   FuncRParams(FuncRParams),
-//!     Don't care.
-//!     Simply pass the Value list to the function call.
-//!
-//!   /// Including grammar non-terminators:\
-//!   /// MulExp, AddExp, RelExp, EqExp, LAndExp, LOrExp\
-//!   /// Lhs: [AstData::BinaryExp]\
-//!   /// Rhs: [AstData::UnaryExp] | [AstData::BinaryExp]
-//!   BinaryExp(BinaryExp),
-//!     Takes a BB, produces a [koopa::ir::Value].
-//!     Pointers: *i32 ptr will be Loaded. Other pointers will panic.
-//!
-//!   ConstExp(ConstExp),
-//!     Takes a BB, produces a [koopa::ir::Value]
-//! }
+// We implement the IR generation for the SysY language in this module.
+// The comments here demonstrate how we pass the AST of Sys-Y and generate Koopa IR.
+//
+// pub enum AstData {
+//   CompUnit(CompUnit),
+//     Produces a [koopa::ir::Program].
+//
+//   Decl(Decl),
+//     Takes a base BB.
+//
+//   ConstDecl(ConstDecl),
+//     Takes a base BB.
+//
+//   BType,
+//     Don't care.
+//
+//   ConstDef(ConstDef),
+//     Takes a base BB if local. produces a [koopa::ir::Value].
+//
+//     If const int, it's an Integer.
+//     If global const array, it's a ptr from GlobalAlloc initialized with Aggregate.
+//     If local const array, it's a ptr from Alloc followed by Aggregate store initialization.
+//
+//     Stored into SymTableEntryData: IntDef or ArrayDef
+//
+//   ConstInitVal(ConstInitVal),
+//     Produces Value::Int or Value::Aggregate.
+//
+//   VarDecl(VarDecl),
+//     Takes a BB.
+//
+//   VarDef(VarDef),
+//     Takes a BB, produces a [koopa::ir::Value].
+//
+//     If global [int|array], it's a ptr from GlobalAlloc initialized with Int or Aggregate,
+//     If local [int|array], it's a ptr from Alloc followed by manual initialization.
+//
+//     Stored into SymTableEntryData: IntDef or ArrayDef
+//
+//   InitVal(InitVal),
+//     If local, it takes a BB, a Value ptr from Alloc, and option shape, produces nothing
+//     If Global, takes nothing and produces a Int or Aggregate.
+//
+//     If global initval:
+//       It must be a Int / Aggregate after const_eval, and will be used in GlobalAlloc initialized.
+//
+//     If local initval:
+//       We can suppose that every Value inside needs computation on the spot.
+//       The ptr and shape will be transferred down for initializing.
+//       The initialization will be done locally, and no side effect.
+//
+//   FuncDef(FuncDef),
+//     Takes a [koopa::ir::Program], produces a [koopa::ir::Function].
+//     Stored into SymTableEntryData: FuncDef
+//
+//   FuncFParams(FuncFParams),
+//     Takes a BB.
+//
+//   FuncFParam(FuncFParam),
+//     Takes the entry BB, produces a [koopa::ir::Value].
+//     The FuncArgRef value provided by the function declaration will be copied into an
+//     manually Alloc. The originall value will be discarded.
+//
+//     For int, it's a *i32 Value from Alloc.
+//     For array, it's *[i32, 3] for int[][3] for example, also from Alloc.
+//
+//     The generated Value will be inserted into symbol table. IntDef / FuncParamArrayDef.
+//
+//
+//   Block(Block),
+//     Takes an entry BB, return the last BB.
+//
+//     When passing Block, the outside gives it the first bb and it will return the last
+//     unclosed basic block. The control will continue on the next Values of that block.
+//
+//     The place the BB is generated is responsible for inserting it into DFG.
+//
+//   BlockItem(BlockItem),
+//     Takes an entry BB, return the last BB.
+//
+//   Stmt(Stmt),
+//     Takes an base BB, return an optional last BB.
+//
+//     IfElse Stmt:
+//       The eval is placed at the base BB, and two BB called br1 and br0 will be
+//       generated. Another empty block will be created as the last BB.
+//
+//     While Stmt:
+//       At least basic blocks: cond, body, and another new "next block" as last BB.
+//       Cond block and "last block" handle will be stored in AstData.
+//
+//     Break Stmt:
+//       Find the nearest while and jump to its next block.
+//       No last block.
+//
+//     Continue Stmt:
+//       Jumps to the nearest while's cond block.
+//       No last block.
+//
+//   Exp(Exp),
+//     Takes a base BB, produces a [koopa::ir::Value].
+//
+//     We should first check if it's const. If it's, return an Integer Value directly.
+//     Otherwise, it will be a ptr, or a i32.
+//
+//
+//   LVal(LVal),
+//     Takes a BB, produces a [koopa::ir::Value].
+//     Ptr or i32.
+//
+//     Find the LVal in symbol tables, and consider cases:
+//     1. for const int, it shoule be Int.
+//     2. for other cases (const array, variable int, variable array), it's a ptr.
+//
+//     If it's an array deref, return the corresponding ptr type. (*i32, *[i32, 5], ...)
+//     Partial deref and complete deref will be handled consitently.
+//
+//   PrimaryExp(PrimaryExp),
+//     Takes a BB, produces a [koopa::ir::Value].
+//
+//     Ptr (for all LVal, some Exp),
+//     or i32 (for all Number and some other Exp).
+//
+//   UnaryExp(UnaryExp),
+//     Takes a BB, produces a [koopa::ir::Value].
+//
+//     For PrimaryExp, take the sub value.
+//     For function call, the produced ValueKind is Call, and the type will be i32 or unit.
+//     For arithmetic, check the sub UnaryExp:
+//       1) if i32, then take the Value.
+//       2) if ptr, then assert(*i32), and use Load to make it i32.
+//
+//
+//   FuncRParams(FuncRParams),
+//     Don't care.
+//     Simply pass the Value list to the function call.
+//
+//   /// Including grammar non-terminators:\
+//   /// MulExp, AddExp, RelExp, EqExp, LAndExp, LOrExp\
+//   /// Lhs: [AstData::BinaryExp]\
+//   /// Rhs: [AstData::UnaryExp] | [AstData::BinaryExp]
+//   BinaryExp(BinaryExp),
+//     Takes a BB, produces a [koopa::ir::Value].
+//     Pointers: *i32 ptr will be Loaded. Other pointers will panic.
+//
+//   ConstExp(ConstExp),
+//     Takes a BB, produces a [koopa::ir::Value]
+// }
 
 use koopa::ir::builder::{
   BasicBlockBuilder, GlobalInstBuilder, LocalBuilder, LocalInstBuilder, ValueBuilder,
@@ -157,7 +156,10 @@ use koopa::ir::layout::InstList;
 
 use koopa::ir::{self, BasicBlock, Function, FunctionData, Program, Type, Value};
 
-use crate::ast::{AstData, AstNodeId, BinaryOp, ConstInitVal, FuncFParam, InitVal, UnaryOp};
+use crate::ast::{
+  AstData, AstNodeId, BinaryOp, ConstInitVal, FuncFParam, InitVal, InitValUnified, IsInitVal,
+  UnaryOp,
+};
 use crate::ast_data_write_as;
 use crate::sym_table::{SymIdent, SymTableEntry, SymTableEntryData};
 
@@ -305,6 +307,7 @@ impl KoopaGen {
   fn gen_on_decl(decl_id: &AstNodeId, ctx: &mut KoopaGenCtx) {
     let decl = decl_id.get_ast_data().into_decl();
     match decl {
+      // local & global const decl case.
       ast::Decl::ConstDecl(const_decl) => {
         for def in const_decl.get_ast_data().into_const_decl().const_defs {
           let const_def = def.get_ast_data().into_const_def();
@@ -316,41 +319,71 @@ impl KoopaGen {
           }
 
           // Integer or Aggregate, depends on the shape.
-          let value =
-            KoopaGen::gen_on_prog_init_val(&const_def.const_init_val, &shape, ctx.prog_mut());
 
-          // for const def, see whether it's an int or an array.
-          if const_def.is_array() {
-            // const array case.
-            let alloc;
-            if ctx.is_global() {
-              alloc = ctx.prog_mut().new_value().global_alloc(value);
+          if ctx.is_global() {
+            let value =
+              KoopaGen::gen_on_prog_init_val(&const_def.const_init_val, &shape, ctx.prog_mut());
+
+            if const_def.is_array() {
+              // global const array case.
+              let alloc = ctx.prog_mut().new_value().global_alloc(value);
+              ctx.prog_mut().set_value_name(alloc, const_def.koopa_name());
+              SymTableEntry {
+                symbol: SymIdent::Value(const_def.ident.clone()),
+                kind: SymTableEntryData::ArrayDef(alloc),
+                func: ctx.func_handle(),
+              }
+              .into_llt(decl_id);
             } else {
-              // We are inside a function.
-              // A local array will be allocated and initialized via a store.
-              alloc = ctx.dfg_mut().new_value().alloc(shape.into_type());
-              let store = ctx.dfg_mut().new_value().store(value, alloc);
-              ctx.insts_mut().extend([alloc, store]);
+              // global const int case.
+              SymTableEntry {
+                symbol: SymIdent::Value(const_def.ident.clone()),
+                kind: SymTableEntryData::ConstIntDef(value.into_i32(ctx.prog_mut())),
+                func: ctx.func_handle(),
+              }
+              .into_llt(decl_id);
             }
-            // No matter global or local, the address is inserted into the symbol table.
-            SymTableEntry {
-              symbol: SymIdent::Value(const_def.ident.clone()),
-              kind: SymTableEntryData::ArrayDef(alloc, shape.into_type()),
-              func: ctx.func_handle(),
-            }
-            .into_llt(decl_id);
           } else {
-            // const int case.
-            // No matter global or local, an int is inserted into the symbol table.
-            SymTableEntry {
-              symbol: SymIdent::Value(const_def.ident.clone()),
-              kind: SymTableEntryData::ConstIntDef(value.into_i32(ctx.prog_mut())),
-              func: ctx.func_handle(),
+            // local const
+            if const_def.is_array() {
+              // local const array case.
+              let alloc = ctx.new_local_value().alloc(shape.into_arr_type());
+              ctx.dfg_mut().set_value_name(alloc, const_def.koopa_name());
+              ctx.dfg_mut().set_value_name(alloc, const_def.koopa_name());
+              ctx.append_ins(alloc);
+
+              KoopaGen::gen_on_local_array_init_val(&const_def.const_init_val, &shape, ctx, alloc);
+
+              SymTableEntry {
+                symbol: SymIdent::Value(const_def.ident.clone()),
+                kind: SymTableEntryData::ArrayDef(alloc),
+                func: ctx.func_handle(),
+              }
+              .into_llt(decl_id);
+            } else {
+              // make sure it's ConstInitVal::Single(ConstExp)
+              let const_initval = const_def
+                .const_init_val
+                .get_ast_data()
+                .into_const_init_val();
+
+              let const_exp = match const_initval {
+                ConstInitVal::Single(exp) => exp,
+                _ => panic!("Invalid ConstInitVal for local const int"),
+              };
+
+              SymTableEntry {
+                symbol: SymIdent::Value(const_def.ident.clone()),
+                // all Sys-y const can be evaluated at compile time.
+                kind: SymTableEntryData::ConstIntDef(KoopaGen::eval_const_int(&const_exp)),
+                func: ctx.func_handle(),
+              }
+              .into_llt(decl_id);
             }
-            .into_llt(decl_id);
           }
         }
       }
+      // local & global variable case.
       ast::Decl::VarDecl(var_decl) => {
         for def in var_decl.get_ast_data().into_var_decl().var_defs {
           let var_def = def.get_ast_data().into_var_def();
@@ -361,36 +394,69 @@ impl KoopaGen {
             shape.push(KoopaGen::eval_const_int(const_exp));
           }
 
-          let alloc = ctx.dfg_mut().new_value().alloc(shape.into_type());
-          ctx.insts_mut().extend([alloc]);
-
-          // Local var initialization.
-          if let Some(init_val) = &var_def.init_val {
-            // If it has an initialization, we need to apply it locally.
-            if var_def.is_array() {
-              KoopaGen::gen_on_local_array_init_val(init_val, &shape, ctx, alloc);
+          if ctx.is_global() {
+            // global variable case
+            let init_value = if let Some(init_val) = &var_def.init_val {
+              // Integer or Aggregate, depends on the shape.
+              KoopaGen::gen_on_prog_init_val(&init_val, &shape, ctx.prog_mut())
             } else {
-              KoopaGen::gen_on_local_int_init_val(init_val, ctx, alloc);
-            }
-          } else {
-            // Local var and no init_val. Do nothing.
-          }
+              // No init value, we need to zero-init it.
+              ctx.prog_mut().new_value().zero_init(shape.into_arr_type())
+            };
 
-          if var_def.is_array() {
-            SymTableEntry {
-              symbol: SymIdent::Value(var_def.ident.clone()),
-              kind: SymTableEntryData::ArrayDef(alloc, shape.into_type()),
-              func: ctx.func_handle(),
+            let alloc = ctx.prog_mut().new_value().global_alloc(init_value);
+            ctx.prog_mut().set_value_name(alloc, var_def.koopa_name());
+            if var_def.is_array() {
+              // global variable array case.
+              SymTableEntry {
+                symbol: SymIdent::Value(var_def.ident.clone()),
+                kind: SymTableEntryData::ArrayDef(alloc),
+                func: ctx.func_handle(),
+              }
+              .into_llt(decl_id);
+            } else {
+              // global variable int case.
+              SymTableEntry {
+                symbol: SymIdent::Value(var_def.ident.clone()),
+                kind: SymTableEntryData::VarIntDef(alloc),
+                func: ctx.func_handle(),
+              }
+              .into_llt(decl_id);
             }
-            .into_llt(decl_id);
           } else {
-            // A Integer Value is inserted into the symbol table.
-            SymTableEntry {
-              symbol: SymIdent::Value(var_def.ident.clone()),
-              kind: SymTableEntryData::VarIntDef(alloc),
-              func: ctx.func_handle(),
+            // local variable case
+            let alloc = ctx.new_local_value().alloc(shape.into_arr_type());
+            ctx.dfg_mut().set_value_name(alloc, var_def.koopa_name());
+            ctx.insts_mut().extend([alloc]);
+
+            // Local var initialization.
+            if let Some(init_val) = &var_def.init_val {
+              // If it has an initialization, we need to apply it locally.
+              if var_def.is_array() {
+                KoopaGen::gen_on_local_array_init_val(init_val, &shape, ctx, alloc);
+              } else {
+                KoopaGen::gen_on_local_int_init_val(init_val, ctx, alloc);
+              }
+            } else {
+              // Local var and no init_val. Do nothing.
             }
-            .into_llt(decl_id);
+
+            if var_def.is_array() {
+              SymTableEntry {
+                symbol: SymIdent::Value(var_def.ident.clone()),
+                kind: SymTableEntryData::ArrayDef(alloc),
+                func: ctx.func_handle(),
+              }
+              .into_llt(decl_id);
+            } else {
+              // A Integer Value is inserted into the symbol table.
+              SymTableEntry {
+                symbol: SymIdent::Value(var_def.ident.clone()),
+                kind: SymTableEntryData::VarIntDef(alloc),
+                func: ctx.func_handle(),
+              }
+              .into_llt(decl_id);
+            }
           }
         }
       }
@@ -403,7 +469,7 @@ impl KoopaGen {
     let mut params = vec![];
     for p in data.params {
       let fparam = p.get_ast_data().into_func_f_param();
-      params.push((Some(fparam.name().clone()), fparam.into_type()));
+      params.push((Some(fparam.name().clone()), fparam.into_arr_type()));
     }
     params
   }
@@ -454,11 +520,7 @@ impl KoopaGen {
       };
     }
 
-    let seq = match data {
-      ast::AstData::ConstInitVal(ast::ConstInitVal::Sequence(seq)) => seq,
-      ast::AstData::InitVal(ast::InitVal::Sequence(seq)) => seq,
-      _ => panic!("Invalid AstData for gen_on_global_init"),
-    };
+    let seq = InitValUnified::from_ast_node(ast_id).get_sequence();
 
     // We use a stack to parse the intialization list, and generate an Aggregate.
     // Every element in the stack has a size. For example, the shape is [3][5][7].
@@ -490,7 +552,7 @@ impl KoopaGen {
     }
 
     if agg_builder.checker.progress == 0 {
-      return prog.new_value().zero_init(shape.into_type());
+      return prog.new_value().zero_init(shape.into_arr_type());
     }
 
     agg_builder.close_up_with_zeroinit(prog)
@@ -518,6 +580,8 @@ impl KoopaGen {
   /// Store value into a local array manually, according to the expected shape.
   /// alloc should be a ptr (to some array or to a specific i32 location)
   ///
+  /// init_val can be a ConstInitVal, or InitVal.
+  ///
   /// Examples:
   /// int a[3] = {}
   /// int b[3] = {1}
@@ -539,42 +603,43 @@ impl KoopaGen {
       alloc = ctx.new_local_value().get_elem_ptr(alloc, zero);
       ctx.append_ins(alloc);
     }
-    match init_val.get_ast_data().into_init_val() {
-      InitVal::Single(_) => panic!("Invalid AstData for gen_on_local_array_init_val"),
-      InitVal::Sequence(seq) => {
-        let mut checker = InitValChecker::new(shape);
 
-        for item in seq {
-          match item.get_ast_data().into_init_val() {
-            InitVal::Single(exp) => {
-              let loc = ctx.new_local_value().integer(checker.progress + 1);
-              checker.append_single();
-              let value = KoopaGen::gen_on_exp(&exp, ctx);
-              let get_ptr = ctx.new_local_value().get_ptr(alloc, loc);
-              let store = ctx.new_local_value().store(value, get_ptr);
-              ctx.insts_mut().extend([get_ptr, store]);
-            }
-            InitVal::Sequence(_) => {
-              let loc = ctx.new_local_value().integer(checker.progress + 1);
-              let sub_shape = checker.append_sequence(true);
+    let data = init_val.get_ast_data();
+    let initval_unified = InitValUnified::from_ast_node(init_val);
+    let seq = initval_unified.get_sequence();
 
-              let sub_alloc = ctx.new_local_value().get_ptr(alloc, loc);
-              ctx.append_ins(sub_alloc);
-              Self::gen_on_local_array_init_val(&item, &sub_shape, ctx, sub_alloc);
-            }
-          }
-        }
+    let mut checker = InitValChecker::new(shape);
 
-        // Fill the rest with zero.
-        // Too slow, but it works.
-        while checker.finished() == false {
-          let loc = ctx.new_local_value().integer(checker.progress + 1);
-          let get_ptr = ctx.new_local_value().get_ptr(alloc, loc);
-          let store = ctx.new_local_value().store(zero, get_ptr);
-          ctx.insts_mut().extend([get_ptr, store]);
-          checker.append_single();
-        }
+    for item in seq {
+      // item is ConstInitVal or InitVal
+      assert!(ast_is!(&item, ConstInitVal) || ast_is!(&item, InitVal));
+
+      let initval = InitValUnified::from_ast_node(&item);
+      if initval.is_single() {
+        let loc = ctx.new_local_value().integer(checker.progress + 1);
+        checker.append_single();
+        let value = KoopaGen::gen_on_exp(&initval.get_single_exp(), ctx);
+        let get_ptr = ctx.new_local_value().get_ptr(alloc, loc);
+        let store = ctx.new_local_value().store(value, get_ptr);
+        ctx.insts_mut().extend([get_ptr, store]);
+      } else {
+        let loc = ctx.new_local_value().integer(checker.progress + 1);
+        let sub_shape = checker.append_sequence(true);
+
+        let sub_alloc = ctx.new_local_value().get_ptr(alloc, loc);
+        ctx.append_ins(sub_alloc);
+        Self::gen_on_local_array_init_val(&item, &sub_shape, ctx, sub_alloc);
       }
+    }
+
+    // Fill the rest with zero.
+    // Too slow, but it works.
+    while checker.finished() == false {
+      let loc = ctx.new_local_value().integer(checker.progress + 1);
+      let get_ptr = ctx.new_local_value().get_ptr(alloc, loc);
+      let store = ctx.new_local_value().store(zero, get_ptr);
+      ctx.insts_mut().extend([get_ptr, store]);
+      checker.append_single();
     }
   }
 
@@ -594,8 +659,8 @@ impl KoopaGen {
           let _ = KoopaGen::gen_on_exp(&exp, ctx);
         }
       }
-      ast::Stmt::Block(_) => {
-        KoopaGen::gen_on_block(stmt, ctx);
+      ast::Stmt::Block(block) => {
+        KoopaGen::gen_on_block(&block, ctx);
       }
       ast::Stmt::IfElse {
         expr,
@@ -604,16 +669,16 @@ impl KoopaGen {
       } => {
         // Eval on the current block
         let cond = KoopaGen::gen_on_exp(&expr, ctx);
-        let true_bb = ctx.new_bb(format!("%br-1-{}", branch1.name()));
-        let sink_bb = ctx.new_bb(format!("%if-sink-{}", stmt.name()));
+        let true_bb = ctx.new_bb(format!("%br_1_{}", branch1.name_len5()));
+        let sink_bb = ctx.new_bb(format!("%if_sink_{}", stmt.name_len5()));
 
         if let Some(branch0) = branch0 {
-          let false_bb = ctx.new_bb(format!("%br-0-{}", branch0.name()));
+          let false_bb = ctx.new_bb(format!("%br_0_{}", branch0.name_len5()));
           let branch = ctx.new_local_value().branch(cond, true_bb, false_bb);
           ctx.append_ins(branch);
 
           ctx.upd_bb(false_bb);
-          KoopaGen::gen_on_block(&branch0, ctx);
+          KoopaGen::gen_on_stmt(&branch0, ctx);
           // now ctx.bb is branch0 sink bb.
           if ctx.bb.is_some() {
             let jump = ctx.new_local_value().jump(sink_bb);
@@ -625,7 +690,7 @@ impl KoopaGen {
         }
 
         ctx.upd_bb(true_bb);
-        KoopaGen::gen_on_block(&branch1, ctx);
+        KoopaGen::gen_on_stmt(&branch1, ctx);
         // now ctx.bb is branch1 sink bb.
         if ctx.bb.is_some() {
           let jump = ctx.new_local_value().jump(sink_bb);
@@ -640,9 +705,9 @@ impl KoopaGen {
         cond_bb: _,
         end_bb: _,
       } => {
-        let cond_bb = ctx.new_bb(format!("%while-cond-{}", stmt.name()));
-        let body_bb = ctx.new_bb(format!("%while-body-{}", stmt.name()));
-        let end_bb = ctx.new_bb(format!("%while-end-{}", stmt.name()));
+        let cond_bb = ctx.new_bb(format!("%while_cond_{}", stmt.name_len5()));
+        let body_bb = ctx.new_bb(format!("%while_body_{}", stmt.name_len5()));
+        let end_bb = ctx.new_bb(format!("%while_sink_{}", stmt.name_len5()));
 
         // update AST stored data, for future break and continue.
         ast_data_write_as!(stmt, Stmt, |stmt| {
@@ -669,7 +734,7 @@ impl KoopaGen {
         ctx.append_ins(branch);
 
         ctx.upd_bb(body_bb);
-        KoopaGen::gen_on_block(&block, ctx);
+        KoopaGen::gen_on_stmt(&block, ctx);
         // now ctx.bb is body sink bb.
         if ctx.bb.is_some() {
           let jump = ctx.new_local_value().jump(cond_bb);
@@ -732,7 +797,7 @@ impl KoopaGen {
         return ctx.new_local_value().integer(v);
       }
       SymTableEntryData::VarIntDef(alloc) => alloc,
-      SymTableEntryData::ArrayDef(mut alloc, _ty) => {
+      SymTableEntryData::ArrayDef(mut alloc) => {
         // Partial deref is impossible.
         // a[3][5][7]
         // middle value:
@@ -809,7 +874,7 @@ impl KoopaGen {
           }
           SymTableEntryData::VarIntDef(_)
           | SymTableEntryData::ConstIntDef(_)
-          | SymTableEntryData::ArrayDef(_, _)
+          | SymTableEntryData::ArrayDef(_)
           | SymTableEntryData::FuncParamArrayDef(_, _) => {
             panic!("Invalid function call");
           }
@@ -875,11 +940,14 @@ impl KoopaGen {
             let zero = ctx.new_local_value().integer(0);
             let lhs_v = KoopaGen::gen_on_binary_exp(&lhs, ctx);
             let temp_alloc = ctx.new_local_value().alloc(Type::get_i32());
+            ctx
+              .dfg_mut()
+              .set_value_name(temp_alloc, Some(format!("%and_temp_{}", exp.name_len5())));
             let default_store_0 = ctx.new_local_value().store(zero, temp_alloc);
             ctx.insts_mut().extend([temp_alloc, default_store_0]);
 
-            let rhs_bb = ctx.new_bb("%and-rhs".to_string());
-            let sink_bb = ctx.new_bb("%and-sink".to_string());
+            let rhs_bb = ctx.new_bb("%and_rhs".to_string());
+            let sink_bb = ctx.new_bb("%and_sink".to_string());
 
             let branch = ctx.new_local_value().branch(lhs_v, rhs_bb, sink_bb);
             ctx.append_ins(branch);
@@ -909,11 +977,14 @@ impl KoopaGen {
           BinaryOp::Or => {
             let one = ctx.new_local_value().integer(1);
             let temp_alloc = ctx.new_local_value().alloc(Type::get_i32());
+            ctx
+              .dfg_mut()
+              .set_value_name(temp_alloc, Some(format!("%or_temp_{}", exp.name_len5())));
             let default_store_1 = ctx.new_local_value().store(one, temp_alloc);
             ctx.insts_mut().extend([temp_alloc, default_store_1]);
 
-            let rhs_bb = ctx.new_bb("%or-rhs".to_string());
-            let sink_bb = ctx.new_bb("%or-sink".to_string());
+            let rhs_bb = ctx.new_bb("%or_rhs".to_string());
+            let sink_bb = ctx.new_bb("%or_sink".to_string());
 
             let lhs_v = KoopaGen::gen_on_binary_exp(&lhs, ctx);
             let branch = ctx.new_local_value().branch(lhs_v, sink_bb, rhs_bb);
@@ -979,7 +1050,7 @@ impl KoopaGen {
           SymTableEntryData::FuncDef(_) => panic!("Function is not a LVal"),
           SymTableEntryData::ConstIntDef(_) => {}
           SymTableEntryData::VarIntDef(_alloc) => {}
-          SymTableEntryData::ArrayDef(mut alloc, _) => {
+          SymTableEntryData::ArrayDef(mut alloc) => {
             // int a[3][5] means *[[i32, 5], 3] in Koopa
             // a, we should get *[i32, 5]
             // a[1], we should get *i32
@@ -1048,11 +1119,11 @@ impl KoopaGen {
 }
 
 trait IntoType {
-  fn into_type(&self) -> Type;
+  fn into_arr_type(&self) -> Type;
 }
 
 impl IntoType for [i32] {
-  fn into_type(&self) -> Type {
+  fn into_arr_type(&self) -> Type {
     let mut ty = Type::get_i32();
     let reversed = self.iter().rev();
     for len in reversed {
@@ -1063,7 +1134,7 @@ impl IntoType for [i32] {
 }
 
 impl IntoType for FuncFParam {
-  fn into_type(&self) -> Type {
+  fn into_arr_type(&self) -> Type {
     match self {
       FuncFParam::Single { btype: _, ident: _ } => Type::get_i32(),
       FuncFParam::Array {
@@ -1160,7 +1231,7 @@ impl<'a> InitValChecker<'a> {
         break;
       }
       tail_size *= size;
-      start_dim = idx;
+      start_dim = idx + 1;
     }
     if dry_run == false {
       self.progress += tail_size;
@@ -1195,7 +1266,10 @@ impl<'a> AggregateBuilder<'a> {
       .filter(|(size, _, _)| *size == last_size)
       .count();
     let stack_top_start_dim = self.stack.last().unwrap().1 as usize;
-    assert!(stack_top_start_dim > 0);
+
+    if stack_top_start_dim == 0 {
+      return;
+    }
 
     if same_size_cnt == self.expected_shape[stack_top_start_dim - 1] as usize {
       let elems = self
@@ -1239,7 +1313,7 @@ impl<'a> AggregateBuilder<'a> {
       if self.checker.can_append_sequence() {
         let zero = prog
           .new_value()
-          .zero_init(self.checker.append_sequence(true).into_type());
+          .zero_init(self.checker.append_sequence(true).into_arr_type());
         self.push_sequence(zero, prog);
       } else {
         self.push_single(prog.new_value().integer(0), prog);

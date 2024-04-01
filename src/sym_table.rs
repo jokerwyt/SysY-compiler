@@ -112,7 +112,7 @@ pub enum SymTableEntryData {
   /// We refer to local/global and variable/const array in a consistent way.
   /// The differences are how we declare it (GlobalAlloc or Alloc) and initialize it.
   /// Value type: *[[i32, 5], 3] for int[3][5]
-  ArrayDef(Value, Type),
+  ArrayDef(Value),
 
   /// It's special because the shape misses its first dimension.
   /// Value type: *[i32, 3] for int[][3]
@@ -122,7 +122,7 @@ pub enum SymTableEntryData {
 impl SymTableEntryData {
   pub fn is_array(&self) -> bool {
     match self {
-      SymTableEntryData::ArrayDef(_, _) => true,
+      SymTableEntryData::ArrayDef(_) => true,
       SymTableEntryData::FuncParamArrayDef(_, _) => true,
 
       SymTableEntryData::FuncDef(_) => false,

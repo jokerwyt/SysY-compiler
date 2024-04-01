@@ -118,8 +118,8 @@ impl AstNodeId {
     res.take()
   }
 
-  pub fn name(&self) -> String {
-    self.0.to_string()
+  pub fn name_len5(&self) -> String {
+    self.0.to_string().chars().take(5).collect()
   }
 
   pub fn is_array(&self) -> bool {
@@ -268,6 +268,11 @@ impl ConstDef {
   pub fn is_array(&self) -> bool {
     self.idx.len() > 0
   }
+
+  /// Just catering for koopa.
+  pub fn koopa_name(&self) -> Option<String> {
+    Some(format!("@{}", self.ident))
+  }
 }
 
 #[derive(Debug, Clone)]
@@ -276,6 +281,14 @@ pub enum ConstInitVal {
   Single(AstNodeId),
   /// Contains many [AstData::ConstInitVal]
   Sequence(Vec<AstNodeId>),
+}
+impl ConstInitVal {
+  pub(crate) fn is_single(&self) -> bool {
+    match self {
+      ConstInitVal::Single(_) => true,
+      ConstInitVal::Sequence(_) => false,
+    }
+  }
 }
 
 #[derive(Debug, Clone)]
@@ -304,6 +317,10 @@ impl VarDef {
   pub fn has_init_val(&self) -> bool {
     self.init_val.is_some()
   }
+
+  pub(crate) fn koopa_name(&self) -> Option<String> {
+    Some(format!("@{}", self.ident))
+  }
 }
 
 #[derive(Debug, Clone)]
@@ -313,6 +330,14 @@ pub enum InitVal {
 
   /// [AstData::InitVal]
   Sequence(Vec<AstNodeId>),
+}
+impl InitVal {
+  pub(crate) fn is_single(&self) -> bool {
+    match self {
+      InitVal::Single(_) => true,
+      InitVal::Sequence(_) => false,
+    }
+  }
 }
 
 #[derive(Debug, Clone)]
@@ -1096,6 +1121,105 @@ impl AstData {
       AstData::PrimaryExp(PrimaryExp::LVal(uuid, ..)) => vec![uuid.clone()],
       AstData::PrimaryExp(PrimaryExp::Number(_)) => vec![],
       AstData::FuncRParams(FuncRParams { params }) => params.clone(),
+    }
+  }
+}
+
+pub trait IsInitVal {
+  fn is_single(&self) -> bool;
+
+  /// Return an Exp if it is a single InitVal
+  /// It should cast ConstExp into Exp.
+  fn get_single_exp(&self) -> AstNodeId;
+
+  /// Sequence of ConstInitVal or InitVal
+  fn get_sequence(&self) -> Vec<AstNodeId>;
+}
+
+impl IsInitVal for InitVal {
+  fn is_single(&self) -> bool {
+    match self {
+      InitVal::Single(_) => true,
+      InitVal::Sequence(_) => false,
+    }
+  }
+
+  fn get_single_exp(&self) -> AstNodeId {
+    if let InitVal::Single(exp) = self {
+      exp.clone()
+    } else {
+      panic!("InitVal::get_single_exp() failed. It is a sequence")
+    }
+  }
+
+  fn get_sequence(&self) -> Vec<AstNodeId> {
+    if let InitVal::Sequence(exps) = self {
+      exps.clone()
+    } else {
+      panic!("InitVal::get_sequence() failed. It is a single")
+    }
+  }
+}
+
+impl IsInitVal for ConstInitVal {
+  fn is_single(&self) -> bool {
+    match self {
+      ConstInitVal::Single(_) => true,
+      ConstInitVal::Sequence(_) => false,
+    }
+  }
+
+  fn get_sequence(&self) -> Vec<AstNodeId> {
+    if let ConstInitVal::Sequence(exps) = self {
+      exps.clone()
+    } else {
+      panic!("ConstInitVal::get_sequence() failed. It is a single")
+    }
+  }
+
+  fn get_single_exp(&self) -> AstNodeId {
+    if let ConstInitVal::Single(exp) = self {
+      exp.get_ast_data().into_const_exp().0
+    } else {
+      panic!("ConstInitVal::get_single_exp() failed. It is a sequence")
+    }
+  }
+}
+
+pub enum InitValUnified {
+  InitVal(InitVal),
+  ConstInitVal(ConstInitVal),
+}
+
+impl InitValUnified {
+  pub(crate) fn from_ast_node(init_val: &AstNodeId) -> Self {
+    match init_val.get_ast_data() {
+      AstData::ConstInitVal(c_init_val) => InitValUnified::ConstInitVal(c_init_val),
+      AstData::InitVal(init_val) => InitValUnified::InitVal(init_val),
+      _ => panic!("Invalid AstData for gen_on_local_array_init_val"),
+    }
+  }
+}
+
+impl IsInitVal for InitValUnified {
+  fn is_single(&self) -> bool {
+    match self {
+      InitValUnified::InitVal(iv) => iv.is_single(),
+      InitValUnified::ConstInitVal(civ) => civ.is_single(),
+    }
+  }
+
+  fn get_single_exp(&self) -> AstNodeId {
+    match self {
+      InitValUnified::InitVal(iv) => iv.get_single_exp(),
+      InitValUnified::ConstInitVal(civ) => civ.get_single_exp(),
+    }
+  }
+
+  fn get_sequence(&self) -> Vec<AstNodeId> {
+    match self {
+      InitValUnified::InitVal(iv) => iv.get_sequence(),
+      InitValUnified::ConstInitVal(civ) => civ.get_sequence(),
     }
   }
 }
