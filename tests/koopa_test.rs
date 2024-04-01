@@ -6,9 +6,9 @@ use sysy_compiler::{koopa_gen::KoopaGen, utils::interpreter::Interpreter};
 lalrpop_mod!(sysy);
 
 #[test]
-fn all_kinds_of_init_will_not_panic() {
+fn complex_init() {
   let progs = String::from(
-    r#"
+    r#" 
 int i32 = 1;
 int t[3] = {1};
 int i32_arr[3][5] = {{}, {1, 2, 3, 4, 5}, 2};
@@ -18,14 +18,14 @@ int main() {
     const int c = 1;
     int d[5] = {i32 + i32_arr[0][0] + ci32_array[0]};
     int i32_arr[3][5] = {{}, {c, 2, 3, 4, 5}, d[1]};
-    return d[0] + d[1] + d[2] + d[3] + d[4] + d[5] + i32_arr[1][1];
+    return d[0] + d[1] + d[2] + d[3] + d[4] + i32_arr[1][1];
 }
   "#,
   );
 
   let ast = sysy::_CompUnitParser::new().parse(&progs).unwrap();
-  println!("{}", ast.tree_to_string(true));
-  KoopaGen::gen_on_compile_unit(&ast);
+  let prog = KoopaGen::gen_on_compile_unit(&ast);
+  assert_eq!(koopa_run(prog), 5);
 }
 
 #[test]
@@ -92,18 +92,69 @@ int main() {
             cnt_even = cnt_even + 1;
         }
         i = i + 1;
+        if (i == 50) {
+            break;
+        } else {
+            continue;
+        }
     }
 
-    return cnt_odd + cnt_even;
+    int a = 0, b = 0, c = 0;
+    i = 0;
+    while (1) {
+        i = i + 1;
+        if (i == 100)
+            break;
+        if (i % 2) {
+            if (i % 5) {
+                a = a + 1;
+            } else {
+                b = b + 1;
+            }
+        } else {
+            c = c + 1;
+        }
+    }
+
+    // cnt_odd + cnt_even = 50
+
+    return cnt_odd + cnt_even + a + b + c;
 }
 
   "#,
   );
 
   let ast = sysy::_CompUnitParser::new().parse(&progs).unwrap();
-  println!("{}", ast.tree_to_string(true));
   let prog = KoopaGen::gen_on_compile_unit(&ast);
-  assert_eq!(koopa_run(prog), 100);
+  assert_eq!(koopa_run(prog), 149);
+}
+
+#[test]
+fn simple_function_call() {
+  let progs = String::from(
+    r#"
+
+int a = 0;
+void func(int i) {
+    a = a + i;
+    return;
+}
+
+int main() {
+    int i = 0;
+    while (i < 100) {
+        i = i + 1;
+        func(i);
+    }
+    return a;
+}
+
+  "#,
+  );
+
+  let ast = sysy::_CompUnitParser::new().parse(&progs).unwrap();
+  let prog = KoopaGen::gen_on_compile_unit(&ast);
+  assert_eq!(koopa_run(prog), 5050);
 }
 
 /// Run the given koopa program and return the return value

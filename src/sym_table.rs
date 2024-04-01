@@ -20,7 +20,7 @@ pub struct SymbolTable {
 }
 
 /// Sys-y allows a function and a value to have the same name.
-#[derive(Hash, Clone, PartialEq, Eq)]
+#[derive(Hash, Clone, PartialEq, Eq, Debug)]
 pub enum SymIdent {
   Func(String),
 
@@ -159,7 +159,8 @@ impl AstNodeId {
       id: SymTableId(self.clone()),
       entries: HashMap::new(),
     };
-    SYMBOLS.with_borrow_mut(|sym_tables| {
+    SYMBOLS.with(|sym_tables| {
+      let mut sym_tables = sym_tables.borrow_mut();
       sym_tables.register(table);
     })
   }

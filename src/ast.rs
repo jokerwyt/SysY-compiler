@@ -716,7 +716,8 @@ impl AstNode {
   /// Insert a node and set its children's parent
   pub fn register(node: AstNode) -> AstNodeId {
     let cur_id = node.id.clone();
-    AST_NODES.with_borrow_mut(|nodes| {
+    AST_NODES.with(|nodes| {
+      let nodes = nodes.borrow_mut();
       for child in node.ast.get_childrens() {
         let mut child = nodes.borrow_mut(&child).unwrap();
         child.parent = Some(cur_id.clone());
