@@ -148,8 +148,6 @@
 //!     Takes a BB, produces a [koopa::ir::Value]
 //! }
 
-use core::panicking::panic;
-
 use koopa::ir::builder::{
   BasicBlockBuilder, GlobalBuilder, GlobalInstBuilder, LocalBuilder, LocalInstBuilder,
   ValueBuilder, ValueInserter,
@@ -374,8 +372,12 @@ impl KoopaGen {
 
           // Local var initialization.
           if let Some(init_val) = &var_def.init_val {
-            // I f it has an initialization, we need to apply it locally.
-            KoopaGen::gen_on_local_init_val(init_val, &shape, ctx, alloc);
+            // If it has an initialization, we need to apply it locally.
+            if var_def.is_array() {
+              KoopaGen::gen_on_local_array_init_val(init_val, &shape, ctx, alloc);
+            } else {
+              KoopaGen::gen_on_local_int_init_val(init_val, ctx, alloc);
+            }
           } else {
             // Local var and no init_val. Do nothing.
           }
@@ -495,30 +497,89 @@ impl KoopaGen {
       return prog.new_value().zero_init(shape.into_type());
     }
 
-    // push zero_init of the stack top type, until the shape is filled.
-    // Done in log time.
-    while agg_builder.stack.first().unwrap().1 != 0 {
-      if agg_builder.checker.can_append_sequence() {
-        let zero = prog
-          .new_value()
-          .zero_init(agg_builder.checker.append_sequence(true).into_type());
-        agg_builder.push_sequence(zero, prog);
-      } else {
-        agg_builder.push_single(prog.new_value().integer(0), prog);
-      }
-    }
-    assert_eq!(agg_builder.stack.len(), 1);
-    agg_builder.stack.first().unwrap().2
+    agg_builder.close_up_with_zeroinit(prog)
   }
 
-  /// alloc is the ptr to the local array, or the local variable.
-  fn gen_on_local_init_val(
+  /// Examples:
+  /// Ok:
+  /// int a = 3
+  ///
+  /// Not Ok:
+  /// int a = {}
+  /// int a = {3}
+  fn gen_on_local_int_init_val(init_val: &AstNodeId, ctx: &mut KoopaGenCtx, alloc: Value) {
+    let data = init_val.get_ast_data();
+    match data {
+      ast::AstData::InitVal(ast::InitVal::Single(exp)) => {
+        let value = KoopaGen::gen_on_exp(&exp, ctx);
+        let store = ctx.dfg_mut().new_value().store(value, alloc);
+        ctx.append_ins(store);
+      }
+      _ => panic!("Invalid AstData for gen_on_local_int_init_val"),
+    }
+  }
+
+  /// Store value into a local array manually, according to the expected shape.
+  /// alloc should be a ptr (to some array or to a specific i32 location)
+  ///
+  /// Examples:
+  /// int a[3] = {}
+  /// int b[3] = {1}
+  /// int c[3] = {1, 2, 3}
+  /// int d[3][3] = {1, 2, 3, {4, 5}, {7, 8, 9}}
+  ///
+  /// Not Ok:
+  /// int a[3][3] = {1, 2, 3, {4, 5}, {{}, 8, 9}}
+  ///
+  fn gen_on_local_array_init_val(
     init_val: &AstNodeId,
     shape: &[i32],
     ctx: &mut KoopaGenCtx,
-    alloc: Value,
+    mut alloc: Value,
   ) {
-    todo!()
+    let zero = ctx.new_local_value().integer(0);
+    // downcast alloc to *i32
+    while ctx.dfg_mut().value(alloc).ty().ptr_inner().is_i32() == false {
+      alloc = ctx.new_local_value().get_elem_ptr(alloc, zero);
+      ctx.append_ins(alloc);
+    }
+    match init_val.get_ast_data().into_init_val() {
+      InitVal::Single(_) => panic!("Invalid AstData for gen_on_local_array_init_val"),
+      InitVal::Sequence(seq) => {
+        let mut checker = InitValChecker::new(shape);
+
+        for item in seq {
+          match item.get_ast_data().into_init_val() {
+            InitVal::Single(exp) => {
+              let loc = ctx.new_local_value().integer(checker.progress + 1);
+              checker.append_single();
+              let value = KoopaGen::gen_on_exp(&exp, ctx);
+              let get_ptr = ctx.new_local_value().get_ptr(alloc, loc);
+              let store = ctx.new_local_value().store(value, get_ptr);
+              ctx.insts_mut().extend([get_ptr, store]);
+            }
+            InitVal::Sequence(_) => {
+              let loc = ctx.new_local_value().integer(checker.progress + 1);
+              let sub_shape = checker.append_sequence(true);
+
+              let sub_alloc = ctx.new_local_value().get_ptr(alloc, loc);
+              ctx.append_ins(sub_alloc);
+              Self::gen_on_local_array_init_val(&item, &sub_shape, ctx, sub_alloc);
+            }
+          }
+        }
+
+        // Fill the rest with zero.
+        // Too slow, but it works.
+        while checker.finished() == false {
+          let loc = ctx.new_local_value().integer(checker.progress + 1);
+          let get_ptr = ctx.new_local_value().get_ptr(alloc, loc);
+          let store = ctx.new_local_value().store(zero, get_ptr);
+          ctx.insts_mut().extend([get_ptr, store]);
+          checker.append_single();
+        }
+      }
+    }
   }
 
   /// Generate Koopa on a Sys-Y Stmt.
@@ -1045,6 +1106,22 @@ impl<'a> InitValChecker<'a> {
     }
   }
 
+  fn finished(&self) -> bool {
+    self.progress == self.expect_shape.iter().product()
+  }
+
+  /// Return the last element that we reached, according to progress
+  fn get_last_elem(&self) -> Vec<i32> {
+    let mut last_elem = vec![];
+    let mut progress = self.progress;
+    for size in self.expect_shape.iter().rev() {
+      last_elem.push(progress % size);
+      progress /= size;
+    }
+    last_elem.reverse();
+    last_elem
+  }
+
   /// Append a single.
   fn append_single(&mut self) {
     self.progress += 1;
@@ -1149,6 +1226,25 @@ impl<'a> AggregateBuilder<'a> {
       val,
     ));
     self.reduce(prog)
+  }
+
+  /// Close up the stack with zero init.
+  /// Return the final value.
+  fn close_up_with_zeroinit(&mut self, prog: &mut Program) -> Value {
+    // push zero_init of the stack top type, until the shape is filled.
+    // Done in log time.
+    while self.stack.first().unwrap().1 != 0 {
+      if self.checker.can_append_sequence() {
+        let zero = prog
+          .new_value()
+          .zero_init(self.checker.append_sequence(true).into_type());
+        self.push_sequence(zero, prog);
+      } else {
+        self.push_single(prog.new_value().integer(0), prog);
+      }
+    }
+    assert_eq!(self.stack.len(), 1);
+    self.stack.first().unwrap().2
   }
 }
 
@@ -1260,7 +1356,7 @@ impl GetArrayShape for Type {
 
   fn ptr_inner(&self) -> Type {
     match self.kind() {
-      ir::TypeKind::Pointer(inner) => *inner,
+      ir::TypeKind::Pointer(inner) => inner.clone(),
       _ => panic!("Not a ptr"),
     }
   }
