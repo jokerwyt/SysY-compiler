@@ -107,8 +107,7 @@ impl KoopaGen {
     let comp_unit = unit_id.get_ast_data().into_comp_unit();
 
     for item in comp_unit.items {
-      ctx.close_up_bb();
-      ctx.func = None;
+      assert!(ctx.func.is_none() && ctx.bb.is_none());
 
       match item.get_ast_data() {
         ast::AstData::Decl(_) => {
@@ -140,7 +139,7 @@ impl KoopaGen {
           .into_llt(unit_id);
 
           ctx.func = Some(func);
-          let new_bb = ctx.new_bb("%entry".to_string());
+          let new_bb = ctx.new_bb_and_append("%entry".to_string());
           ctx.upd_bb(new_bb);
 
           // re-Alloc the function parameters, and add them into the function symbol table.
@@ -165,10 +164,16 @@ impl KoopaGen {
           KoopaGen::gen_on_block(&func_def.block, &mut ctx);
 
           // default return, and has sink block
-          if func_def.has_retval == false && ctx.bb.is_some() {
-            let ret = ctx.new_local_value().ret(None);
-            ctx.append_ins(ret);
+          if ctx.bb.is_some() {
+            // If func_def.has_retval == true, and the user code really runs here, it's actually an UB.
+            // But we cannot panic now, since the user may promise it will never reach here.
+            let zero = Some(ctx.new_local_value().integer(0));
+            let ret = ctx
+              .new_local_value()
+              .ret(if func_def.has_retval { zero } else { None });
+            ctx.close_up(ret);
           }
+          ctx.func = None;
         }
         _ => panic!("Invalid item in CompUnit"),
       }
@@ -547,24 +552,24 @@ impl KoopaGen {
       } => {
         // Eval on the current block
         let cond = KoopaGen::gen_on_exp(&expr, ctx);
-        let true_bb = ctx.new_bb(format!("%br_1_{}", branch1.name_len5()));
-        let sink_bb = ctx.new_bb(format!("%if_sink_{}", stmt.name_len5()));
+        let true_bb = ctx.new_bb_and_append(format!("%br_1_{}", branch1.name_len5()));
+        let sink_bb = ctx.new_bb_and_append(format!("%if_sink_{}", stmt.name_len5()));
 
         if let Some(branch0) = branch0 {
-          let false_bb = ctx.new_bb(format!("%br_0_{}", branch0.name_len5()));
+          let false_bb = ctx.new_bb_and_append(format!("%br_0_{}", branch0.name_len5()));
           let branch = ctx.new_local_value().branch(cond, true_bb, false_bb);
-          ctx.append_ins(branch);
+          ctx.close_up(branch);
 
           ctx.upd_bb(false_bb);
           KoopaGen::gen_on_stmt(&branch0, ctx);
           // now ctx.bb is branch0 sink bb.
           if ctx.bb.is_some() {
             let jump = ctx.new_local_value().jump(sink_bb);
-            ctx.append_ins(jump);
+            ctx.close_up(jump);
           }
         } else {
           let branch = ctx.new_local_value().branch(cond, true_bb, sink_bb);
-          ctx.append_ins(branch);
+          ctx.close_up(branch);
         }
 
         ctx.upd_bb(true_bb);
@@ -572,9 +577,8 @@ impl KoopaGen {
         // now ctx.bb is branch1 sink bb.
         if ctx.bb.is_some() {
           let jump = ctx.new_local_value().jump(sink_bb);
-          ctx.append_ins(jump);
+          ctx.close_up(jump);
         }
-
         ctx.upd_bb(sink_bb);
       }
       ast::Stmt::While {
@@ -583,9 +587,9 @@ impl KoopaGen {
         cond_bb: _,
         end_bb: _,
       } => {
-        let cond_bb = ctx.new_bb(format!("%while_cond_{}", stmt.name_len5()));
-        let body_bb = ctx.new_bb(format!("%while_body_{}", stmt.name_len5()));
-        let end_bb = ctx.new_bb(format!("%while_sink_{}", stmt.name_len5()));
+        let cond_bb = ctx.new_bb_and_append(format!("%while_cond_{}", stmt.name_len5()));
+        let body_bb = ctx.new_bb_and_append(format!("%while_body_{}", stmt.name_len5()));
+        let end_bb = ctx.new_bb_and_append(format!("%while_sink_{}", stmt.name_len5()));
 
         // update AST stored data, for future break and continue.
         ast_data_write_as!(stmt, Stmt, |stmt| {
@@ -604,19 +608,19 @@ impl KoopaGen {
         });
 
         let jump = ctx.new_local_value().jump(cond_bb);
-        ctx.append_ins(jump);
+        ctx.close_up(jump);
 
         ctx.upd_bb(cond_bb);
         let cond = KoopaGen::gen_on_exp(&expr, ctx);
         let branch = ctx.new_local_value().branch(cond, body_bb, end_bb);
-        ctx.append_ins(branch);
+        ctx.close_up(branch);
 
         ctx.upd_bb(body_bb);
         KoopaGen::gen_on_stmt(&block, ctx);
         // now ctx.bb is body sink bb.
         if ctx.bb.is_some() {
           let jump = ctx.new_local_value().jump(cond_bb);
-          ctx.append_ins(jump);
+          ctx.close_up(jump);
         }
 
         ctx.upd_bb(end_bb);
@@ -625,8 +629,7 @@ impl KoopaGen {
         let while_stmt = stmt.get_nearest_while().unwrap();
         if let ast::Stmt::While { end_bb, .. } = while_stmt.get_ast_data().into_stmt() {
           let jump = ctx.new_local_value().jump(end_bb.unwrap());
-          ctx.append_ins(jump);
-          ctx.close_up_bb();
+          ctx.close_up(jump);
         } else {
           panic!("Invalid Stmt type for break");
         }
@@ -635,22 +638,19 @@ impl KoopaGen {
         let while_stmt = stmt.get_nearest_while().unwrap();
         if let ast::Stmt::While { cond_bb, .. } = while_stmt.get_ast_data().into_stmt() {
           let jump = ctx.new_local_value().jump(cond_bb.unwrap());
-          ctx.append_ins(jump);
-          ctx.close_up_bb();
+          ctx.close_up(jump);
         } else {
           panic!("Invalid Stmt type for continue");
         }
       }
       ast::Stmt::Return(exp) => {
-        if let Some(exp) = exp {
+        let ret = if let Some(exp) = exp {
           let ret = KoopaGen::gen_on_exp(&exp, ctx);
-          let ret_inst = ctx.new_local_value().ret(Some(ret));
-          ctx.append_ins(ret_inst);
+          ctx.new_local_value().ret(Some(ret))
         } else {
-          let ret_inst = ctx.new_local_value().ret(None);
-          ctx.append_ins(ret_inst);
-        }
-        ctx.close_up_bb();
+          ctx.new_local_value().ret(None)
+        };
+        ctx.close_up(ret);
       }
     }
   }
@@ -830,11 +830,11 @@ impl KoopaGen {
             let default_store_0 = ctx.new_local_value().store(zero, temp_alloc);
             ctx.insts_mut().extend([temp_alloc, default_store_0]);
 
-            let rhs_bb = ctx.new_bb("%and_rhs".to_string());
-            let sink_bb = ctx.new_bb("%and_sink".to_string());
+            let rhs_bb = ctx.new_bb_and_append("%and_rhs".to_string());
+            let sink_bb = ctx.new_bb_and_append("%and_sink".to_string());
 
             let branch = ctx.new_local_value().branch(lhs_v, rhs_bb, sink_bb);
-            ctx.append_ins(branch);
+            ctx.close_up(branch);
 
             ctx.upd_bb(rhs_bb);
 
@@ -850,7 +850,8 @@ impl KoopaGen {
                 .binary(koopa::ir::BinaryOp::NotEq, zero, rhs_v);
             let store_rhs = ctx.new_local_value().store(rhs_converted, temp_alloc);
             let jump = ctx.new_local_value().jump(sink_bb);
-            ctx.insts_mut().extend([rhs_converted, store_rhs, jump]);
+            ctx.insts_mut().extend([rhs_converted, store_rhs]);
+            ctx.close_up(jump);
 
             ctx.upd_bb(sink_bb);
 
@@ -867,12 +868,12 @@ impl KoopaGen {
             let default_store_1 = ctx.new_local_value().store(one, temp_alloc);
             ctx.insts_mut().extend([temp_alloc, default_store_1]);
 
-            let rhs_bb = ctx.new_bb("%or_rhs".to_string());
-            let sink_bb = ctx.new_bb("%or_sink".to_string());
+            let rhs_bb = ctx.new_bb_and_append("%or_rhs".to_string());
+            let sink_bb = ctx.new_bb_and_append("%or_sink".to_string());
 
             let lhs_v = KoopaGen::gen_on_binary_exp(&lhs, ctx);
             let branch = ctx.new_local_value().branch(lhs_v, sink_bb, rhs_bb);
-            ctx.append_ins(branch);
+            ctx.close_up(branch);
 
             ctx.upd_bb(rhs_bb);
 
@@ -889,7 +890,8 @@ impl KoopaGen {
                 .binary(koopa::ir::BinaryOp::NotEq, zero, rhs_v);
             let store_lhs = ctx.new_local_value().store(rhs_converted, temp_alloc);
             let jump = ctx.new_local_value().jump(sink_bb);
-            ctx.insts_mut().extend([rhs_converted, store_lhs, jump]);
+            ctx.insts_mut().extend([rhs_converted, store_lhs]);
+            ctx.close_up(jump);
 
             ctx.upd_bb(sink_bb);
 
@@ -1395,27 +1397,26 @@ impl<'a> KoopaGenCtx<'a> {
       .dfg_mut()
       .new_bb()
       .basic_block(Some(name));
+    bb
+  }
+
+  fn append_bb(&mut self, bb: BasicBlock) {
     self.func_data_mut().layout_mut().bbs_mut().extend([bb]);
+  }
+
+  fn new_bb_and_append(&mut self, name: String) -> BasicBlock {
+    let bb = self.new_bb(name);
+    self.append_bb(bb);
     bb
   }
 
   fn upd_bb(&mut self, bb: BasicBlock) {
-    if self.bb.is_some() && self.insts_mut().is_empty() {
-      // eliminate empty bb, make compiler happy.
-      let myself = self.bb.unwrap().clone();
-      let jmp = self.new_local_value().jump(myself);
-      self.append_ins(jmp);
-    }
+    assert!(self.bb.is_none());
     self.bb = Some(bb);
   }
 
-  fn close_up_bb(&mut self) {
-    if self.bb.is_some() && self.insts_mut().is_empty() {
-      // eliminate empty bb, make compiler happy.
-      let myself = self.bb.unwrap().clone();
-      let jmp = self.new_local_value().jump(myself);
-      self.append_ins(jmp);
-    }
+  fn close_up(&mut self, br_or_jmp_or_ret: Value) {
+    self.insts_mut().extend([br_or_jmp_or_ret]);
     self.bb = None;
   }
 }
