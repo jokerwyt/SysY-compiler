@@ -1,5 +1,3 @@
-use std::io::stdout;
-
 fn main() {
   // the only arg is the koopa ir file name
   let args: Vec<String> = std::env::args().collect();
