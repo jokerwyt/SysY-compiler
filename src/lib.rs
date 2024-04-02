@@ -1,3 +1,4 @@
 pub mod ast;
-pub mod semantics;
+pub mod koopa_gen;
+pub mod sym_table;
 pub mod utils;

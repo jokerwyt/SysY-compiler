@@ -12,7 +12,6 @@ fn can_generate_ast_hello() {
   }
 }
 
-
 #[test]
 fn can_generate_ast_complex() {
   for path in vec!["tests/test_prog/complex.y"] {

@@ -1,4 +1,7 @@
-use std::{cell::{Ref, RefCell, RefMut}, collections::HashMap};
+use std::{
+  cell::{Ref, RefCell, RefMut},
+  collections::HashMap,
+};
 
 use uuid::Uuid;
 
@@ -48,49 +51,49 @@ pub trait UuidOwner {
 }
 
 /// A macro generates a thread_local static variable and the submit functions.
-/// 
+///
 #[macro_export]
 macro_rules! global_mapper {
   ($name:ident, $read_func_name:ident, $write_func_name:ident, $register_name:ident, $value_type:ty) => {
     thread_local! {
-      static $name: std::cell::RefCell<crate::utils::uuid_mapper::UuidMapper<$value_type>> 
+      static $name: std::cell::RefCell<crate::utils::uuid_mapper::UuidMapper<$value_type>>
         = std::cell::RefCell::new(crate::utils::uuid_mapper::UuidMapper::new());
     }
 
     /// Submit a closure to the UuidMapper with the given id.
     /// Returns Err if the id does not exist.
-    pub fn $read_func_name<F, R>(id: &Uuid, closure: F) -> Result<R, String>
-    where 
-      F: FnOnce(&$value_type) -> R
+    pub fn $read_func_name<F, R>(id: &Uuid, closure: F) -> R
+    where
+      F: FnOnce(&$value_type) -> R,
     {
       $name.with(|values| {
         let values = values.borrow();
         let value = values.borrow(id);
         if let Some(value) = value {
-          return Ok(closure(&value));
+          return closure(&value);
         } else {
-          return Err(format!("UuidMapper {}: id {} does not exist", stringify!($name), id));
+          panic!("UuidMapper {}: id {} does not exist", stringify!($name), id);
         }
       })
     }
 
-    pub fn $write_func_name<F, R>(id: &Uuid, closure: F) -> Result<R, String>
-    where 
-      F: FnOnce(&mut $value_type) -> R
+    pub fn $write_func_name<F, R>(id: &Uuid, closure: F) -> R
+    where
+      F: FnOnce(&mut $value_type) -> R,
     {
       $name.with(|values| {
         let values = values.borrow_mut();
         let value = values.borrow_mut(id);
         if let Some(mut value) = value {
-          return Ok(closure(&mut value));
+          return closure(&mut value);
         } else {
-          return Err(format!("UuidMapper {}: id {} does not exist", stringify!($name), id));
+          panic!("UuidMapper {}: id {} does not exist", stringify!($name), id);
         }
       })
-    }  
+    }
 
     /// Register a new value and return its id.
-    /// 
+    ///
     /// # Panic
     /// panic if the id already exists.
     pub fn $register_name(data: $value_type) -> Uuid {

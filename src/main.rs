@@ -1,9 +1,12 @@
 mod pg;
-use sysy_compiler::ast::AstNodeId;
+
 use clap::Parser;
+use koopa::back::KoopaGenerator;
 use lalrpop_util::lalrpop_mod;
 use std::fs::read_to_string;
-use std::io::Result;
+use std::io::{stdout, Result, Write};
+use sysy_compiler::ast::AstNodeId;
+use sysy_compiler::koopa_gen::KoopaGen;
 
 lalrpop_mod!(sysy);
 
@@ -25,39 +28,28 @@ fn main() -> Result<()> {
   let args = Cli::parse();
 
   let input = args.input;
-  let _output = args.output;
+  let output = args.output;
 
   let input = read_to_string(input)?;
 
   let _ast: AstNodeId = sysy::_CompUnitParser::new().parse(&input).unwrap();
+  // stdout().write(_ast.tree_to_string(true).as_bytes())?;
 
-  // ast.semantics_analyze();
+  // koopa IR generation
+  let prog = KoopaGen::gen_on_compile_unit(&_ast);
 
   if args.koopa.is_some() {
+    // Target Koopa
     assert!(args.riscv.is_none());
 
-    // compile my ast 
+    let mut text_gen = KoopaGenerator::new(Vec::new());
+    text_gen.generate_on(&prog)?;
+    let text_form_ir = std::str::from_utf8(&text_gen.writer()).unwrap().to_string();
+
+    // print to the output file
+    std::fs::write(output, text_form_ir)?;
   } else {
-    let _prog = koopa::ir::Program::new();
-    // let main = prog.new_func(FunctionData::with_param_names(
-    //   "@main".into(),
-    //   vec![],
-    //   Type::get_i32(),
-    // ));
-    
-    // // let main_data = prog.func_mut(main);
-    // // let bb = main_data.dfg_mut().new_bb().basic_block(Some("%entry".into()));
-    // // main_data.layout_mut().bbs_mut().extend(vec![bb]);
-    
-    // // let ret_val = main_data.dfg_mut().new_value().integer(ast.func_def.block.stmt.num);
-    // // let ret_statement = main_data.dfg_mut().new_value().ret(Some(ret_val));
-    // // main_data.layout_mut().bb_mut(bb).insts_mut().extend([ret_statement]);
-    
-    // // open the output file
-    // let output_file = std::fs::File::create(output)?;
-    // let mut generator = KoopaGenerator::new(output_file);
-    // generator.generate_on(&prog)?;
-    
+    // Target Riscv
   }
   Ok(())
 }
