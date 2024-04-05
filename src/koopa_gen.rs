@@ -1185,7 +1185,6 @@ impl<'a> InitValChecker<'a> {
   }
 
   /// Return the last element that we reached, according to progress
-  #[allow(dead_code)]
   fn get_next_loc(&self) -> Vec<i32> {
     let mut last_elem = vec![];
     let mut progress = self.progress;
