@@ -3,8 +3,8 @@
 use koopa::ir::{Function, Type, Value};
 use uuid::Uuid;
 
-use crate::ast;
-use crate::ast::AstNodeId;
+use crate::koopa_gen::ast;
+use crate::koopa_gen::ast::AstNodeId;
 use crate::utils::dfs::TreeId;
 use crate::utils::uuid_mapper::UuidOwner;
 use crate::utils::Res;

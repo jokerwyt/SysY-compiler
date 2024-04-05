@@ -1,12 +1,10 @@
-mod pg;
-
 use clap::Parser;
 use koopa::back::KoopaGenerator;
 use lalrpop_util::lalrpop_mod;
 use std::fs::read_to_string;
-use std::io::{stdout, Result, Write};
-use sysy_compiler::ast::AstNodeId;
-use sysy_compiler::koopa_gen::KoopaGen;
+use std::io::Result;
+use sysy_compiler::koopa_gen::ast::AstNodeId;
+use sysy_compiler::koopa_gen::gen::KoopaGen;
 
 lalrpop_mod!(sysy);
 
@@ -32,11 +30,11 @@ fn main() -> Result<()> {
 
   let input = read_to_string(input)?;
 
-  let _ast: AstNodeId = sysy::_CompUnitParser::new().parse(&input).unwrap();
-  // stdout().write(_ast.tree_to_string(true).as_bytes())?;
+  let ast: AstNodeId = sysy::_CompUnitParser::new().parse(&input).unwrap();
+  // stdout().write(ast.tree_to_string(true).as_bytes())?;
 
   // koopa IR generation
-  let prog = KoopaGen::gen_on_compile_unit(&_ast);
+  let prog = KoopaGen::gen_on_compile_unit(&ast);
 
   if args.koopa.is_some() {
     // Target Koopa

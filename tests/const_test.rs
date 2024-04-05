@@ -1,9 +1,9 @@
 use lalrpop_util::lalrpop_mod;
-use sysy_compiler::{
-  ast::{self, ast_nodes_read, AstNodeId},
-  ast_data_read_as, ast_is,
-  koopa_gen::KoopaGen,
-};
+use sysy_compiler::koopa_gen::ast;
+use sysy_compiler::koopa_gen::ast::ast_nodes_read;
+use sysy_compiler::koopa_gen::ast::AstData;
+use sysy_compiler::koopa_gen::ast::AstNodeId;
+use sysy_compiler::{ast_data_read_as, ast_is, koopa_gen::gen::KoopaGen};
 lalrpop_mod!(sysy);
 
 /// Get the return value of the main function based on the whole symbol table.

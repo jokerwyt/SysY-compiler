@@ -1,19 +1,19 @@
 use std::fmt::{Debug, Formatter};
 
-use crate::{define_wrapper, global_mapper, sym_table::SymIdent, utils::dfs::TreeId};
+use crate::{define_wrapper, global_mapper, utils::dfs::TreeId};
 use koopa::ir::BasicBlock;
 use uuid::Uuid;
 
 use crate::utils::uuid_mapper::UuidOwner;
+
+use super::sym_table::SymIdent;
 
 /// Given the AstNodeId, return true if the corresponding AstNode keeps a
 /// specific variant of AstData.
 #[macro_export]
 macro_rules! ast_is {
   ($node_id:expr, $variant:ident) => {
-    ast_nodes_read($node_id, |node| {
-      matches!(&node.ast, crate::ast::AstData::$variant(_))
-    })
+    ast_nodes_read($node_id, |node| matches!(&node.ast, AstData::$variant(_)))
   };
 }
 
@@ -21,7 +21,7 @@ macro_rules! ast_is {
 #[macro_export]
 macro_rules! ast_node_into {
   ($node:expr, $variant:ident) => {
-    if let crate::ast::AstData::$variant(data) = &$node.ast {
+    if let AstData::$variant(data) = &$node.ast {
       data
     } else {
       panic!("ast_node_into!() failed")
@@ -54,7 +54,7 @@ macro_rules! ast_data_read_as {
 macro_rules! ast_data_write_as {
   ($node_id:expr, $variant:ident, |$data:ident| $closure:expr) => {
     ast_nodes_write($node_id, |node| {
-      if let crate::ast::AstData::$variant($data) = &mut node.ast {
+      if let crate::koopa_gen::ast::AstData::$variant($data) = &mut node.ast {
         $closure
       } else {
         panic!("ast_data_write_as!() failed")

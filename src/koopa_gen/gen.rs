@@ -14,14 +14,15 @@ use koopa::ir::layout::InstList;
 
 use koopa::ir::{self, BasicBlock, Function, FunctionData, Program, Type, Value};
 
-use crate::ast::{
+use crate::ast_data_write_as;
+use crate::koopa_gen::ast::{
   AstData, AstNodeId, BinaryOp, ConstInitVal, FuncFParam, InitVal, InitValUnified, IsInitVal,
   UnaryOp,
 };
-use crate::ast_data_write_as;
-use crate::sym_table::{SymIdent, SymTableEntry, SymTableEntryData};
+use crate::koopa_gen::sym_table::{SymIdent, SymTableEntry, SymTableEntryData};
 
-use crate::{ast, ast::ast_nodes_read, ast::ast_nodes_write, ast_is};
+use crate::ast_is;
+use crate::koopa_gen::{ast, ast::ast_nodes_read, ast::ast_nodes_write};
 
 pub struct KoopaGen;
 
