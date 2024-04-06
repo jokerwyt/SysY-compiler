@@ -509,7 +509,10 @@ impl KoopaGen {
     }
 
     while checker.finished() == false {
-      if checker.can_append_sequence() {
+      if false && checker.can_append_sequence() {
+        // Reason that we disable this branch:
+        // It works well, but our backend does not support zero_init for store.
+
         let next_loc = checker.get_next_loc();
         let sub_shape = checker.append_sequence(false);
         let sub_alloc =
@@ -1421,12 +1424,13 @@ impl<'a> KoopaGenCtx<'a> {
   }
 }
 
-trait GetArrayShape {
+pub trait TypeUtils {
   fn ptr_inner(&self) -> Type;
   fn get_array_shape(&self) -> Vec<i32>;
+  fn array_inner(&self) -> Type;
 }
 
-impl GetArrayShape for Type {
+impl TypeUtils for Type {
   /// it will return vec![] for i32
   fn get_array_shape(&self) -> Vec<i32> {
     let mut shape = vec![];
@@ -1451,6 +1455,13 @@ impl GetArrayShape for Type {
     match self.kind() {
       ir::TypeKind::Pointer(inner) => inner.clone(),
       _ => panic!("Not a ptr"),
+    }
+  }
+
+  fn array_inner(&self) -> Type {
+    match self.kind() {
+      ir::TypeKind::Array(inner, _) => inner.clone(),
+      _ => panic!("Not an array"),
     }
   }
 }
