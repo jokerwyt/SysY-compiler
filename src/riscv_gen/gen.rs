@@ -1,15 +1,13 @@
-use std::borrow::Borrow;
-
 use koopa::ir::{BasicBlock, Function, Program, Type, Value};
 
 use crate::{
-  koopa_gen::gen::{KoopaValueDataToString, TypeUtils},
+  koopa_gen::gen::{FetchValueType, KoopaValueDataToString, TypeUtils},
   riscv_gen::riscv_isa::{Directive, RiscvAsmLine},
 };
 
 use super::{
-  frame_manager::{CrazySpiller, FrameAlloc, FrameManager},
-  riscv_isa::{Imm, Imm12, Inst, Label, LabelKind, Reg, RiscvProg},
+  frame_manager::{CrazySpiller, FrameManager, RtValue},
+  riscv_isa::{Imm, Imm12, Inst, Label, LabelKind, Reg, RiscvProg, FUNC_ARG_REGS},
 };
 
 pub struct RiscvGen<'a> {
@@ -52,7 +50,10 @@ impl<'a> RiscvGen<'a> {
     self.riscv_prog.extend([
       RiscvAsmLine::Diretive(Directive::Text),
       RiscvAsmLine::Diretive(Directive::Globl(fdata.name()[1..].to_string())),
-      RiscvAsmLine::Label(Label::new(fdata.name()[1..].to_string(), LabelKind::Func)),
+      RiscvAsmLine::Label(Label::new(
+        fdata.name()[1..].to_string(),
+        LabelKind::NativeFunc,
+      )),
     ]);
 
     self.fmnger = Some(FrameManager::<CrazySpiller>::new(
@@ -60,7 +61,7 @@ impl<'a> RiscvGen<'a> {
       fdata,
       Reg::all()
         .iter()
-        .filter(|r| *r != &Reg::Zero && ![Reg::Ra, Reg::Sp, Reg::T0, Reg::T1, Reg::A0].contains(r))
+        .filter(|r| ![Reg::Zero, Reg::Ra, Reg::Sp, Reg::T0, Reg::T1, Reg::A0].contains(r))
         .cloned()
         .collect::<Vec<_>>()
         .as_slice(),
@@ -69,20 +70,13 @@ impl<'a> RiscvGen<'a> {
     // Prologue. Move Sp and save all callee-saved registers.
     let flen = self.fmnger().frame_len;
     self.riscv_prog.more_insts([
-      Inst::Li(Reg::T0, Imm::new(-flen)),
+      Inst::Li(Reg::T0, Imm::new(flen)),
       Inst::Sub(Reg::Sp, Reg::Sp, Reg::T0),
     ]);
 
-    for reg in self
-      .fmnger()
-      .active_reg
-      .clone()
-      .iter()
-      .filter(|reg| reg.is_callee_saved())
-      .collect::<Vec<_>>()
-    {
-      let reg_loc = self.fmnger().reg_loc(reg);
-      self.store_reg_to(reg, &reg_loc, Some(&Reg::T0));
+    for reg in self.fmnger().need_callee_saved_regs() {
+      let reg_loc = self.fmnger().reg_buffer_loc(&reg);
+      self.store_reg_to(&reg, &reg_loc, Some(&Reg::T0));
     }
 
     // basic block translation
@@ -96,23 +90,19 @@ impl<'a> RiscvGen<'a> {
         self.riscv_prog.comment(idata.to_string());
         match idata.kind() {
           koopa::ir::ValueKind::Alloc(_) => {}
-          koopa::ir::ValueKind::Load(ptr) => {
-            let dest = self.fmnger().local_alloc(inst);
-            let src_ptr = self.global_to_local(&ptr.src(), Some(Reg::T0));
+          koopa::ir::ValueKind::Load(load) => {
+            let dest = self.rt_val(inst, None);
+            let src_ptr = self.rt_val(&load.src(), Some(Reg::T0));
             let sz = idata.ty().size();
             if sz != 4 {
               unimplemented!("only support 4 bytes load");
             }
 
             // load the src ptr into T0
-            let src_reg = self.hold_to_reg(src_ptr, Reg::T0);
-
-            // deref the src_ptr
-            self
-              .riscv_prog
-              .append_inst(Inst::Lw(src_reg, src_reg, Imm12::zero()));
+            let src_reg = self.deref_rtval(src_ptr, Some(Reg::T0));
 
             // store the value to dest
+            // use T1 to secure src_reg == T0
             self.store_reg_to(&src_reg, &dest, Some(&Reg::T1));
           }
           koopa::ir::ValueKind::Store(store) => {
@@ -120,50 +110,56 @@ impl<'a> RiscvGen<'a> {
             let dst_ptr = store.dest();
 
             let src_data = fdata.dfg().value(src);
-            let dst_ptr_data = fdata.dfg().value(dst_ptr);
+            let dst_ptr_type = dst_ptr.get_type(&self.koopa_prog, self.func_data());
 
-            let ty = dst_ptr_data.ty().ptr_inner();
+            let ty = dst_ptr_type.ptr_inner();
             assert!(src_data.ty().eq(&ty), "store type mismatch");
             if ty.size() != 4 {
               unimplemented!("only support 4 bytes store");
             }
 
-            // non-constant value case
-            let src_reg = self.global_to_local(&src, Some(Reg::T0));
-            let dst_loc = self.global_to_local(&dst_ptr, Some(Reg::T1));
+            let src_reg = self.find_rtval_and_get_reg(src, Reg::T0);
 
-            self.store_reg_to(src_reg.reg(), &dst_loc, Some(&Reg::T1));
+            // T0 may be occupied by src_reg now. Switch to T1.
+            let dst_loc = self.rt_val(&dst_ptr, Some(Reg::T1));
+
+            // use T1 to secure src_reg == T0
+            self.store_reg_to_ref(src_reg, dst_loc, Some(&Reg::T1));
           }
           koopa::ir::ValueKind::GetPtr(getptr) => {
-            let idx_loc = self.global_to_local(&getptr.index(), Some(Reg::T0));
+            let idx_loc = self.rt_val(&getptr.index(), Some(Reg::T0));
+            let size_unit = getptr
+              .src()
+              .get_type(&self.koopa_prog, self.func_data())
+              .ptr_inner()
+              .size() as i32;
             self.advance_ptr(
               &getptr.src(),
-              fdata.dfg().value(getptr.src()).ty().ptr_inner().size() as i32,
+              size_unit,
               idx_loc,
-              self.fmnger().local_alloc(inst),
+              self.fmnger().local_value(inst),
             );
           }
           koopa::ir::ValueKind::GetElemPtr(getelem) => {
-            let idx_loc = self.global_to_local(&getelem.index(), Some(Reg::T0));
+            let idx_loc = self.rt_val(&getelem.index(), Some(Reg::T0));
+            let size_unit = getelem
+              .src()
+              .get_type(&self.koopa_prog, self.func_data())
+              .ptr_inner()
+              .array_inner() // Think about *[[i32, 3], 4] -> [i32, 3]
+              .size() as i32;
+
             self.advance_ptr(
               &getelem.src(),
-              fdata
-                .dfg()
-                .value(getelem.src())
-                .ty()
-                .ptr_inner()
-                .array_inner() // Think about *[[i32, 3], 4] -> [i32, 3]
-                .size() as i32,
+              size_unit,
               idx_loc,
-              self.fmnger().local_alloc(inst),
+              self.fmnger().local_value(inst),
             );
           }
           koopa::ir::ValueKind::Binary(binary) => {
-            let lhs_loc = self.global_to_local(&binary.lhs(), Some(Reg::T0));
-            let rhs_loc = self.global_to_local(&binary.rhs(), Some(Reg::T1));
-
-            let lhs_reg = self.hold_to_reg(lhs_loc, Reg::T0);
-            let rhs_reg = self.hold_to_reg(rhs_loc, Reg::T1);
+            let lhs_reg = self.find_rtval_and_get_reg(binary.lhs(), Reg::T0);
+            let rhs_reg = self.find_rtval_and_get_reg(binary.rhs(), Reg::T1);
+            // Note: T0 and T1 may be occupied by lhs_reg and rhs_reg now.
 
             // the result is put to lhs_reg
             match binary.op() {
@@ -228,49 +224,71 @@ impl<'a> RiscvGen<'a> {
 
             self.store_reg_to(
               &lhs_reg,
-              &self.fmnger().local_alloc(inst),
-              Some(&Reg::T1), // lhs_reg may equal to T0
+              &self.fmnger().local_value(inst),
+              Some(&Reg::T1), // lhs_reg will not be T1.
             );
           }
           koopa::ir::ValueKind::Branch(branch) => {
-            let cond_loc = self.global_to_local(&branch.cond(), Some(Reg::T0));
-            let cond_reg = self.hold_to_reg(cond_loc, Reg::T0);
+            let cond_reg = self.find_rtval_and_get_reg(branch.cond(), Reg::T0);
 
             self.riscv_prog.more_insts([
               Inst::Bnez(cond_reg, self.bb_label(fhandle, &branch.true_bb())),
               Inst::J(self.bb_label(fhandle, &branch.false_bb())),
             ]);
           }
+
           koopa::ir::ValueKind::Jump(jmp) => self
             .riscv_prog
             .more_insts([Inst::J(self.bb_label(fhandle, &jmp.target()))]),
+
           koopa::ir::ValueKind::Call(call) => {
             // save caller-saved registers
-            for reg in self
-              .fmnger()
-              .active_reg
-              .clone()
-              .iter()
-              .filter(|reg| reg.is_caller_saved())
-            {
-              self.store_reg_to(reg, &self.fmnger().reg_loc(reg), Some(&Reg::T0));
+            for reg in self.fmnger().need_caller_saved_regs() {
+              self.store_reg_to(&reg, &self.fmnger().reg_buffer_loc(&reg), Some(&Reg::T0));
             }
 
             // prepare arguments
             for (idx, arg) in call.args().iter().enumerate() {
-              let arg_loc = self.global_to_local(arg, Some(Reg::T0));
-              let arg_reg = self.hold_to_reg(arg_loc, Reg::T0);
-              self.store_reg_to(&arg_reg, &self.fmnger().arg_loc(idx), None); // small offset
+              let arg_reg = self.find_rtval_and_get_reg(*arg, Reg::T0);
+              if FUNC_ARG_REGS.contains(&arg_reg) {
+                unimplemented!(
+                  "Such a src arg_reg, let's say A0, reg may be covered by previous args setup."
+                )
+              }
+              self.store_reg_to(&arg_reg, &self.fmnger().func_call_arg_rtval(idx), None);
+              // The offset is small so we don't need temp.
             }
 
             // call
-            self.riscv_prog.more_insts([Inst::Call(Label::new(
-              self.koopa_prog.func(call.callee()).name().to_string(),
-              LabelKind::Func,
-            ))]);
+
+            if self
+              .koopa_prog
+              .func(call.callee())
+              .layout()
+              .bbs()
+              .is_empty()
+            {
+              // foreign function.
+              self.riscv_prog.more_insts([Inst::Call(Label::new(
+                self.koopa_prog.func(call.callee()).name()[1..].to_string(),
+                LabelKind::ForeignFunc,
+              ))]);
+            } else {
+              self.riscv_prog.more_insts([Inst::Call(Label::new(
+                self.koopa_prog.func(call.callee()).name()[1..].to_string(),
+                LabelKind::NativeFunc,
+              ))]);
+            }
 
             // save return value to T0
-            self.store_reg_to(&Reg::A0, &self.fmnger().local_alloc(inst), Some(&Reg::T0));
+
+            let mut has_retval = false;
+            let mut ret_rtval = None;
+            if self.fmnger().func_data().dfg().value(*inst).ty().is_i32() {
+              has_retval = true;
+              ret_rtval = Some(self.fmnger().local_value(inst));
+              self.store_reg_to(&Reg::A0, &ret_rtval.unwrap(), Some(&Reg::T1));
+            }
 
             // restore caller-saved registers
             for reg in self
@@ -280,33 +298,28 @@ impl<'a> RiscvGen<'a> {
               .iter()
               .filter(|reg| reg.is_caller_saved())
             {
-              let load_reg = self.hold_to_reg(self.fmnger().reg_loc(reg), *reg);
+              if has_retval {
+                if let RtValue::Reg(ret_reg) = ret_rtval.unwrap() {
+                  if *reg == ret_reg {
+                    // We don't restore this reg since it is covered by the return value.
+                    continue;
+                  }
+                }
+              }
+              let load_reg = self.into_reg(self.fmnger().reg_buffer_loc(reg), *reg);
               assert!(load_reg == *reg);
             }
-
-            // move T0 to the destination of Koopa Call Inst
-            self.store_reg_to(&Reg::T0, &self.fmnger().local_alloc(inst), Some(&Reg::T1));
           }
           koopa::ir::ValueKind::Return(ret) => {
             if let Some(ret) = ret.value() {
-              let ret_loc = self.global_to_local(&ret, Some(Reg::A0));
-              let ret_reg = self.hold_to_reg(ret_loc, Reg::A0);
-
-              if ret_reg != Reg::A0 {
-                self.riscv_prog.append_inst(Inst::Mv(Reg::A0, ret_reg));
-              }
+              let ret_reg = self.find_rtval_and_get_reg(ret, Reg::A0);
+              self.store_reg_to(&ret_reg, &RtValue::Reg(Reg::A0), None);
             }
 
             // Epilogue. Restore all callee-saved registers and move Sp.
-            for reg in self
-              .fmnger()
-              .active_reg
-              .clone()
-              .iter()
-              .filter(|reg| reg.is_callee_saved())
-            {
-              let load_reg = self.hold_to_reg(self.fmnger().reg_loc(reg), *reg);
-              assert!(load_reg == *reg);
+            for reg in self.fmnger().need_callee_saved_regs() {
+              let load_reg = self.into_reg(self.fmnger().reg_buffer_loc(&reg), reg);
+              assert!(load_reg == reg);
             }
 
             self.riscv_prog.more_insts([
@@ -391,9 +404,10 @@ impl<'a> RiscvGen<'a> {
   }
 
   /// Advance the pointer by `inner_size * idx` and store the result to `target`.
-  fn advance_ptr(&mut self, ptr: &Value, size_unit: i32, idx: FrameAlloc, target: FrameAlloc) {
-    let idx_reg = self.hold_to_reg(idx, Reg::T1);
-    assert!(idx_reg != Reg::T0);
+  fn advance_ptr(&mut self, ptr: &Value, size_unit: i32, idx: RtValue, target: RtValue) {
+    let idx_reg = self.into_reg(idx, Reg::T1);
+    // idx_reg maybe T1, or T0, or something else.
+
     let tmp_reg = if idx_reg != Reg::T0 { Reg::T0 } else { Reg::T1 };
 
     // ptr += inner_size * idx
@@ -403,49 +417,38 @@ impl<'a> RiscvGen<'a> {
     ]);
     // Now idx_reg = inner_size * idx
 
-    let ptr_loc = self.global_to_local(ptr, Some(tmp_reg));
-    let ptr_reg = self.hold_to_reg(ptr_loc, tmp_reg);
+    let ptr_reg = self.find_rtval_and_get_reg(*ptr, tmp_reg);
     assert!(ptr_reg != idx_reg);
 
     self
       .riscv_prog
       .append_inst(Inst::Add(ptr_reg, ptr_reg, idx_reg));
-
     // Now ptr_reg = ptr + inner_size * idx
+
+    // ptr_reg maybe T0, or T1, or something else.
+    // Secure tmp2_reg != ptr_reg in all cases.
     let tmp2_reg = if ptr_reg != Reg::T0 { Reg::T0 } else { Reg::T1 };
     self.store_reg_to(&ptr_reg, &target, Some(&tmp2_reg));
   }
 
   /// If the value is a global alloc or constant, then the result is loaded into `oncall_reg`.
-  /// Otherwise, the result is stored in the frame and the frame location is returned.
-  fn global_to_local(&mut self, val: &Value, oncall_reg: Option<Reg>) -> FrameAlloc {
+  ///
+  /// Side effect:
+  /// oncall_reg may be occupied.
+  fn rt_val(&mut self, val: &Value, may_used: Option<Reg>) -> RtValue {
     if val.is_global() {
       // It must be a global alloc.
       let vdata = self.koopa_prog.borrow_value(*val);
       let vkind = vdata.kind();
       assert!(vkind.is_global_alloc());
-      let oncall_reg = oncall_reg.unwrap();
+      let oncall_reg = may_used.unwrap();
       self.riscv_prog.append_inst(Inst::La(
         oncall_reg,
         Label::new(vdata.name().as_ref().unwrap().clone(), LabelKind::GlobalVar),
       ));
-      return FrameAlloc::Reg(oncall_reg);
+      return RtValue::Reg(oncall_reg);
     } else {
-      let vkind = self.fmnger().func_data().dfg().value(*val).kind();
-      if vkind.is_const() {
-        let oncall_reg = oncall_reg.unwrap();
-        let cc = match vkind {
-          koopa::ir::ValueKind::Integer(v) => v.value(),
-          koopa::ir::ValueKind::ZeroInit(_) => 0,
-          _ => panic!("Unexpected constant value"),
-        };
-        self
-          .riscv_prog
-          .append_inst(Inst::Li(oncall_reg, Imm::new(cc)));
-        return FrameAlloc::Reg(oncall_reg);
-      } else {
-        return self.fmnger.as_ref().unwrap().local_alloc(val);
-      }
+      return self.fmnger.as_ref().unwrap().local_value(val);
     };
   }
 
@@ -453,36 +456,70 @@ impl<'a> RiscvGen<'a> {
     self.fmnger.as_ref().unwrap()
   }
 
-  /// Load a frame allocation from the memory to a register, if it is a SpOffset.
-  /// If the src_loc is a register, it will return the register.
-  /// Otherwise, it will load the value to the oncall_reg and return the oncall_reg.
+  /// Take the value in RtValue into a reg.
+  ///
+  /// If the value lies in a register itself, the register will be returned.
+  ///
+  /// Otherwise, the value will be loaded into the given may_used registers.
+  ///
+  /// In mental model, programmer can assume that the may_used register is
+  /// the register that is used to store the value.
+  ///
+  ///
+  /// Side effect:
+  /// oncall_reg may be occupied under such conditions:
+  /// 1. The value is a stack offset or constant.
+  /// 2. The value is on stack.
   #[must_use]
-  pub(crate) fn hold_to_reg(&mut self, src_loc: FrameAlloc, oncall_reg: Reg) -> Reg {
+  pub(crate) fn into_reg(&mut self, src_loc: RtValue, may_used: Reg) -> Reg {
     match src_loc {
-      FrameAlloc::SpOffset(offset) => {
+      RtValue::SpOffset(offset) => {
+        self.riscv_prog.more_insts([
+          Inst::Li(may_used, Imm::new(offset)),
+          Inst::Add(may_used, Reg::Sp, may_used),
+        ]);
+        may_used
+      }
+
+      RtValue::Reg(reg) => reg,
+      RtValue::Integer(v) => {
+        self.riscv_prog.append_inst(Inst::Li(may_used, Imm::new(v)));
+        may_used
+      }
+
+      RtValue::Stack(offset) => {
         if let Ok(offset) = Imm12::try_from(offset) {
           self
             .riscv_prog
-            .more_insts([Inst::Lw(oncall_reg, Reg::Sp, offset)])
+            .more_insts([Inst::Lw(may_used, Reg::Sp, offset)])
         } else {
           self.riscv_prog.more_insts([
-            Inst::Li(oncall_reg, Imm::new(offset)),
-            Inst::Add(oncall_reg, Reg::Sp, oncall_reg),
-            Inst::Lw(oncall_reg, oncall_reg, Imm12::zero()),
+            Inst::Li(may_used, Imm::new(offset)),
+            Inst::Add(may_used, Reg::Sp, may_used),
+            Inst::Lw(may_used, may_used, Imm12::zero()),
           ]);
         }
-        return oncall_reg;
+        return may_used;
       }
-      FrameAlloc::Reg(reg) => reg,
+      RtValue::RegRef(_) => panic!("into_reg: unexpected RtValue"),
     }
   }
 
-  /// Store the value in the register to the memory.
-  /// If the offset is too large, it will use the temp register to store the offset, and return true.
-  /// Otherwise, it will return false.
-  pub(crate) fn store_reg_to(&mut self, src: &Reg, dest: &FrameAlloc, temp: Option<&Reg>) -> bool {
+  /// Store the value in the register to the given RtValue location.
+  ///
+  /// Need to promise:
+  /// src != temp
+  pub(crate) fn store_reg_to(&mut self, src: &Reg, dest: &RtValue, temp: Option<&Reg>) -> bool {
     match dest {
-      FrameAlloc::SpOffset(ofs) => {
+      RtValue::SpOffset(_) => panic!("store_reg_to: SpOffset is not supported"),
+      RtValue::Reg(reg) => {
+        if reg != src {
+          self.riscv_prog.append_inst(Inst::Mv(*reg, *src));
+        }
+        return false;
+      }
+      RtValue::Integer(_) => panic!("store_reg_to: Const is not supported"),
+      RtValue::Stack(ofs) => {
         if let Ok(ofs) = Imm12::try_from(*ofs) {
           self.riscv_prog.more_insts([Inst::Sw(*src, Reg::Sp, ofs)]);
           return false;
@@ -500,12 +537,77 @@ impl<'a> RiscvGen<'a> {
           return true;
         }
       }
-      FrameAlloc::Reg(reg) => {
-        if reg != src {
-          self.riscv_prog.append_inst(Inst::Mv(*reg, *src));
-        }
-        return false;
+      RtValue::RegRef(_) => panic!("store_reg_to: unexpected RtValue"),
+    }
+  }
+
+  fn func_data(&self) -> &koopa::ir::FunctionData {
+    return self.fmnger().func_data();
+  }
+
+  /// Dereference the RtValue to a register.
+  ///
+  /// Side effect:
+  /// oncall may be messed up.
+  fn deref_rtval(&mut self, src_ptr: RtValue, oncall: Option<Reg>) -> Reg {
+    match src_ptr {
+      RtValue::Integer(_) => panic!("deref_rtval: Const is not supported"),
+      RtValue::SpOffset(ofs) => self.into_reg(RtValue::Stack(ofs), oncall.unwrap()),
+      RtValue::Stack(ofs) => {
+        let reg = self.into_reg(RtValue::Stack(ofs), oncall.unwrap());
+        self
+          .riscv_prog
+          .more_insts([Inst::Lw(reg, reg, Imm12::zero())]);
+        reg
+      }
+      RtValue::Reg(reg) => {
+        self
+          .riscv_prog
+          .more_insts([Inst::Lw(reg, reg, Imm12::zero())]);
+        reg
+      }
+      RtValue::RegRef(reg) => reg,
+    }
+  }
+
+  /// Fetch value from src_reg and store it into *dst_loc.
+  ///
+  /// Side effect:
+  /// oncall may be messed up.
+  ///
+  /// Need to promise:
+  /// src_reg != oncall
+  fn store_reg_to_ref(&mut self, src_reg: Reg, dst_loc: RtValue, oncall: Option<&Reg>) {
+    match dst_loc {
+      RtValue::Integer(_) => panic!("store_reg_to_ref: Const is not supported"),
+      RtValue::SpOffset(ofs) => {
+        self.store_reg_to(&src_reg, &RtValue::Stack(ofs), oncall);
+      }
+      RtValue::Reg(reg) => {
+        self
+          .riscv_prog
+          .more_insts([Inst::Sw(src_reg, reg, Imm12::zero())]);
+      }
+      RtValue::Stack(ofs) => {
+        let oncall = oncall.unwrap();
+        assert!(src_reg != *oncall);
+        let reg = self.into_reg(RtValue::Stack(ofs), *oncall);
+        assert!(&reg == oncall);
+
+        self
+          .riscv_prog
+          .more_insts([Inst::Sw(src_reg, *oncall, Imm12::zero())]);
+      }
+      RtValue::RegRef(reg) => {
+        self.riscv_prog.more_insts([Inst::Mv(src_reg, reg)]);
       }
     }
+  }
+
+  /// Side effect:
+  /// oncall may be occupied.
+  fn find_rtval_and_get_reg(&mut self, ptr: Value, oncall: Reg) -> Reg {
+    let ptr_loc = self.rt_val(&ptr, Some(oncall));
+    self.into_reg(ptr_loc, oncall)
   }
 }

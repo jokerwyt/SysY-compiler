@@ -5,6 +5,9 @@
 // It includes the current program, function, basic block, and other necessary information.
 // And we suppose all statements should have a sink basic block, which is placed in the ctx.
 
+use std::borrow::Borrow;
+use std::cell::Ref;
+
 use koopa::ir::builder::{
   BasicBlockBuilder, GlobalInstBuilder, LocalBuilder, LocalInstBuilder, ValueBuilder,
 };
@@ -835,8 +838,8 @@ impl KoopaGen {
             let default_store_0 = ctx.new_local_value().store(zero, temp_alloc);
             ctx.insts_mut().extend([temp_alloc, default_store_0]);
 
-            let rhs_bb = ctx.new_bb_and_append("%and_rhs".to_string());
-            let sink_bb = ctx.new_bb_and_append("%and_sink".to_string());
+            let rhs_bb = ctx.new_bb_and_append(format!("%and_rhs_{}", exp.name_len5()));
+            let sink_bb = ctx.new_bb_and_append(format!("%and_sink_{}", exp.name_len5()));
 
             let branch = ctx.new_local_value().branch(lhs_v, rhs_bb, sink_bb);
             ctx.close_up(branch);
@@ -873,8 +876,8 @@ impl KoopaGen {
             let default_store_1 = ctx.new_local_value().store(one, temp_alloc);
             ctx.insts_mut().extend([temp_alloc, default_store_1]);
 
-            let rhs_bb = ctx.new_bb_and_append("%or_rhs".to_string());
-            let sink_bb = ctx.new_bb_and_append("%or_sink".to_string());
+            let rhs_bb = ctx.new_bb_and_append(format!("%or_rhs_{}", exp.name_len5()));
+            let sink_bb = ctx.new_bb_and_append(format!("%or_sink_{}", exp.name_len5()));
 
             let lhs_v = KoopaGen::gen_on_binary_exp(&lhs, ctx);
             let branch = ctx.new_local_value().branch(lhs_v, sink_bb, rhs_bb);
@@ -1482,48 +1485,63 @@ impl KoopaValueDataToString for ValueData {
       | ir::ValueKind::BlockArgRef(_) => "".to_string(),
       ir::ValueKind::Alloc(_) => {
         let ty = self.ty();
-        format!("alloc {}", ty.to_string())
+        format!("alloc --> {}", ty.to_string())
       }
       ir::ValueKind::GlobalAlloc(_) => {
         let ty = self.ty();
-        format!("global_alloc {}", ty.to_string())
+        format!("global_alloc --> {}", ty.to_string())
       }
       ir::ValueKind::Load(_) => {
         let ty = self.ty();
-        format!("load {}", ty.to_string())
+        format!("load --> {}", ty.to_string())
       }
       ir::ValueKind::Store(_) => {
         let ty = self.ty();
-        format!("store {}", ty.to_string())
+        format!("store --> {}", ty.to_string())
       }
       ir::ValueKind::GetPtr(_) => {
         let ty = self.ty();
-        format!("getptr {}", ty.to_string())
+        format!("getptr --> {}", ty.to_string())
       }
       ir::ValueKind::GetElemPtr(_) => {
         let ty = self.ty();
-        format!("getelemptr {}", ty.to_string())
+        format!("getelemptr --> {}", ty.to_string())
       }
       ir::ValueKind::Binary(_) => {
         let ty = self.ty();
-        format!("binary {}", ty.to_string())
+        format!("binary --> {}", ty.to_string())
       }
       ir::ValueKind::Branch(_) => {
         let ty = self.ty();
-        format!("branch {}", ty.to_string())
+        format!("branch --> {}", ty.to_string())
       }
       ir::ValueKind::Jump(_) => {
         let ty = self.ty();
-        format!("jump {}", ty.to_string())
+        format!("jump --> {}", ty.to_string())
       }
       ir::ValueKind::Call(_) => {
         let ty = self.ty();
-        format!("call {}", ty.to_string())
+        format!("call --> {}", ty.to_string())
       }
       ir::ValueKind::Return(_) => {
         let ty = self.ty();
-        format!("ret {}", ty.to_string())
+        format!("ret --> {}", ty.to_string())
       }
+    }
+  }
+}
+
+pub(crate) trait FetchValueType<'a> {
+  fn get_type(&self, prog: &'a Program, func: &'a FunctionData) -> Type;
+}
+
+impl<'a> FetchValueType<'a> for Value {
+  fn get_type(&self, prog: &'a Program, func: &'a FunctionData) -> Type {
+    if self.is_global() {
+      let value = prog.borrow_value(*self);
+      value.ty().clone()
+    } else {
+      func.dfg().value(*self).ty().clone()
     }
   }
 }

@@ -48,6 +48,14 @@ fn main() -> Result<()> {
     // print to the output file
     std::fs::write(output, text_form_ir)?;
   } else {
+    let mut text_gen = KoopaGenerator::new(Vec::new());
+    text_gen.generate_on(&koopa_prog)?;
+    let text_form_ir = std::str::from_utf8(&text_gen.writer()).unwrap().to_string();
+
+    // print to the output file
+
+    let _ = std::fs::write("debug/koopa.out", text_form_ir);
+
     // Target Riscv
 
     let riscv_gen = RiscvGen::new(&koopa_prog);

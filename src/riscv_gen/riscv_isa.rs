@@ -1,5 +1,3 @@
-use super::frame_manager::FrameAlloc;
-
 #[derive(Clone, Copy, Debug, PartialEq, Hash, Eq)]
 pub enum Reg {
   Zero,
@@ -251,27 +249,35 @@ pub struct Label {
 #[derive(PartialEq)]
 pub enum LabelKind {
   GlobalVar,
-  Func,
+  NativeFunc,
   BasicBlock { func_name: String },
+  ForeignFunc,
 }
 
 impl LabelKind {
-  pub fn prefix(&self) -> String {
+  fn label_name(&self, name: String) -> String {
     match self {
-      LabelKind::Func => "koopa_func".to_string(),
-      LabelKind::BasicBlock { func_name } => format!("koopa_{}_bb", func_name),
-      LabelKind::GlobalVar => "koopa_glb_var".to_string(),
+      LabelKind::GlobalVar => format!("koopa_glb_var_{}", name),
+      LabelKind::NativeFunc => {
+        if name == "main" {
+          return "main".to_string();
+        } else {
+          format!("koopa_func_{}", name)
+        }
+      }
+      LabelKind::BasicBlock { func_name } => {
+        format!("koopa_{}_bb_{}", func_name, name)
+      }
+      LabelKind::ForeignFunc => {
+        format!("{}", name)
+      }
     }
   }
 }
 
 impl Label {
   pub fn new(name: String, ty: LabelKind) -> Self {
-    let name = if name == "main" && ty == LabelKind::Func {
-      "main".to_string()
-    } else {
-      format!("{}_{}", ty.prefix(), name)
-    };
+    let name = ty.label_name(name);
     Self { name }
   }
 }
@@ -332,7 +338,16 @@ pub enum Inst {
   /// mv r_dest, r_src
   Mv(Reg, Reg),
 }
-
+pub const FUNC_ARG_REGS: [Reg; 8] = [
+  Reg::A0,
+  Reg::A1,
+  Reg::A2,
+  Reg::A3,
+  Reg::A4,
+  Reg::A5,
+  Reg::A6,
+  Reg::A7,
+];
 impl Inst {
   pub fn to_string(&self) -> String {
     match self {
