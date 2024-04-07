@@ -10,6 +10,7 @@ use koopa::ir::builder::{
 };
 use koopa::ir::dfg::DataFlowGraph;
 
+use koopa::ir::entities::ValueData;
 use koopa::ir::layout::InstList;
 
 use koopa::ir::{self, BasicBlock, Function, FunctionData, Program, Type, Value};
@@ -1462,6 +1463,67 @@ impl TypeUtils for Type {
     match self.kind() {
       ir::TypeKind::Array(inner, _) => inner.clone(),
       _ => panic!("Not an array"),
+    }
+  }
+}
+
+pub(crate) trait KoopaValueDataToString {
+  fn to_string(&self) -> String;
+}
+
+impl KoopaValueDataToString for ValueData {
+  fn to_string(&self) -> String {
+    match self.kind() {
+      ir::ValueKind::Integer(_)
+      | ir::ValueKind::ZeroInit(_)
+      | ir::ValueKind::Undef(_)
+      | ir::ValueKind::Aggregate(_)
+      | ir::ValueKind::FuncArgRef(_)
+      | ir::ValueKind::BlockArgRef(_) => "".to_string(),
+      ir::ValueKind::Alloc(_) => {
+        let ty = self.ty();
+        format!("alloc {}", ty.to_string())
+      }
+      ir::ValueKind::GlobalAlloc(_) => {
+        let ty = self.ty();
+        format!("global_alloc {}", ty.to_string())
+      }
+      ir::ValueKind::Load(_) => {
+        let ty = self.ty();
+        format!("load {}", ty.to_string())
+      }
+      ir::ValueKind::Store(_) => {
+        let ty = self.ty();
+        format!("store {}", ty.to_string())
+      }
+      ir::ValueKind::GetPtr(_) => {
+        let ty = self.ty();
+        format!("getptr {}", ty.to_string())
+      }
+      ir::ValueKind::GetElemPtr(_) => {
+        let ty = self.ty();
+        format!("getelemptr {}", ty.to_string())
+      }
+      ir::ValueKind::Binary(_) => {
+        let ty = self.ty();
+        format!("binary {}", ty.to_string())
+      }
+      ir::ValueKind::Branch(_) => {
+        let ty = self.ty();
+        format!("branch {}", ty.to_string())
+      }
+      ir::ValueKind::Jump(_) => {
+        let ty = self.ty();
+        format!("jump {}", ty.to_string())
+      }
+      ir::ValueKind::Call(_) => {
+        let ty = self.ty();
+        format!("call {}", ty.to_string())
+      }
+      ir::ValueKind::Return(_) => {
+        let ty = self.ty();
+        format!("ret {}", ty.to_string())
+      }
     }
   }
 }

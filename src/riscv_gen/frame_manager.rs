@@ -1,13 +1,17 @@
 use std::collections::HashMap;
 
-use koopa::ir::{FunctionData, Value};
+use koopa::ir::{FunctionData, Program, Value};
 
-use super::riscv_isa::{Imm, Imm12, Inst, Reg, RiscvProg};
+use super::{
+  gen::RiscvGen,
+  riscv_isa::{Imm, Inst, Reg, RiscvProg},
+};
 
 pub struct FrameManager<'a, Allocator>
 where
   Allocator: FrameAllocator,
 {
+  prog: &'a Program,
   func: &'a FunctionData,
 
   /// Frame
@@ -31,6 +35,14 @@ pub enum FrameAlloc {
   SpOffset(i32),
   Reg(Reg),
 }
+impl FrameAlloc {
+  pub(crate) fn reg(&self) -> &Reg {
+    match self {
+      FrameAlloc::SpOffset(_) => panic!("Not a register"),
+      FrameAlloc::Reg(reg) => reg,
+    }
+  }
+}
 
 #[derive(Clone)]
 pub enum AbstractAlloc {
@@ -42,8 +54,9 @@ impl<'a, Allocator> FrameManager<'a, Allocator>
 where
   Allocator: FrameAllocator,
 {
-  pub fn new(func: &'a FunctionData, available_regs: &[Reg]) -> Self {
+  pub fn new(prog: &'a Program, func: &'a FunctionData, available_regs: &[Reg]) -> Self {
     let mut manager = Self {
+      prog,
       func,
       frame_len: 0,
       allocator: Allocator::new(func, available_regs),
@@ -54,7 +67,7 @@ where
     // Outgoing Arguments part.
     let mut is_leave_func = false;
     let mut longest_args = 0;
-    for (vhandle, vdata) in func.dfg().values() {
+    for (_vhandle, vdata) in func.dfg().values() {
       if let koopa::ir::ValueKind::Call(call) = vdata.kind() {
         let params = call.args().len();
         longest_args = longest_args.max(params);
@@ -94,8 +107,15 @@ where
     )
   }
 
-  /// Return the allocation of local values in the frame.
-  pub fn loc(&self, val: &Value) -> FrameAlloc {
+  pub fn func_data(&self) -> &FunctionData {
+    self.func
+  }
+
+  /// Return the allocation of local non-const values in the frame.
+  /// If the return is reg, the register must be available.
+  pub fn local_alloc(&self, val: &Value) -> FrameAlloc {
+    assert!(val.is_global() == false);
+    assert!(self.func_data().dfg().value(*val).kind().is_const() == false);
     match self.allocator.alloc(val) {
       AbstractAlloc::Mem(i32) => FrameAlloc::SpOffset(i32 + 4 * self.outgoing_args_cnt),
       AbstractAlloc::Reg(reg) => FrameAlloc::Reg(reg),
@@ -119,6 +139,10 @@ where
     } else {
       FrameAlloc::Reg(arg_regs[idx])
     }
+  }
+
+  pub(crate) fn allocator(&self) -> &Allocator {
+    &self.allocator
   }
 }
 
@@ -156,7 +180,7 @@ pub struct CrazySpiller {
 }
 
 impl FrameAllocator for CrazySpiller {
-  fn new(func: &FunctionData, available_regs: &[Reg]) -> Self {
+  fn new(func: &FunctionData, _available_regs: &[Reg]) -> Self {
     let mut ret = Self {
       peak_mem: 0,
       mapping: HashMap::new(),
@@ -170,7 +194,7 @@ impl FrameAllocator for CrazySpiller {
         | koopa::ir::ValueKind::Undef(_)
         | koopa::ir::ValueKind::Aggregate(_)
         | koopa::ir::ValueKind::FuncArgRef(_)
-        | koopa::ir::ValueKind::BlockArgRef(_) => panic!("Unexpected value kind"),
+        | koopa::ir::ValueKind::BlockArgRef(_) => {}
 
         koopa::ir::ValueKind::Alloc(_)
         | koopa::ir::ValueKind::Load(_)

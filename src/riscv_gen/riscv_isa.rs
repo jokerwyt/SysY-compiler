@@ -246,29 +246,33 @@ impl TryFrom<i32> for Imm12 {
 
 pub struct Label {
   pub name: String,
-  kind: LabelKind,
 }
 
+#[derive(PartialEq)]
 pub enum LabelKind {
+  GlobalVar,
   Func,
   BasicBlock { func_name: String },
 }
 
 impl LabelKind {
-  pub fn as_str(&self) -> String {
+  pub fn prefix(&self) -> String {
     match self {
       LabelKind::Func => "koopa_func".to_string(),
       LabelKind::BasicBlock { func_name } => format!("koopa_{}_bb", func_name),
+      LabelKind::GlobalVar => "koopa_glb_var".to_string(),
     }
   }
 }
 
 impl Label {
   pub fn new(name: String, ty: LabelKind) -> Self {
-    Self {
-      name: format!("{}_{}", ty.as_str(), name),
-      kind: ty,
-    }
+    let name = if name == "main" && ty == LabelKind::Func {
+      "main".to_string()
+    } else {
+      format!("{}_{}", ty.prefix(), name)
+    };
+    Self { name }
   }
 }
 
@@ -434,6 +438,7 @@ pub enum RiscvAsmLine {
   Diretive(Directive),
   Label(Label),
   Inst(Inst),
+  Comment(String),
 }
 
 pub struct RiscvProg {
@@ -469,56 +474,20 @@ impl RiscvProg {
     self.lines.extend(lines.into_iter())
   }
 
-  pub(crate) fn load_to_reg(&mut self, dst_ptr_alloc: FrameAlloc, target: Reg) {
-    match dst_ptr_alloc {
-      FrameAlloc::SpOffset(offset) => {
-        if let Ok(offset) = Imm12::try_from(offset) {
-          self.more_insts([Inst::Lw(target, Reg::Sp, offset)])
-        } else {
-          self.more_insts([
-            Inst::Li(target, Imm::new(offset)),
-            Inst::Add(target, Reg::Sp, target),
-            Inst::Lw(target, target, Imm12::zero()),
-          ]);
-        }
-      }
-      FrameAlloc::Reg(reg) => {
-        if target != reg {
-          self.append_inst(Inst::Mv(target, reg));
-        }
-      }
-    }
+  pub(crate) fn comment(&mut self, comment: String) {
+    self.lines.push(RiscvAsmLine::Comment(comment));
   }
 
-  /// Store the value in the register to the memory.
-  /// If the offset is too large, it will use the temp register to store the offset, and return true.
-  /// Otherwise, it will return false.
-  pub(crate) fn store_reg_to(&mut self, src: &Reg, dest: &FrameAlloc, temp: Option<&Reg>) -> bool {
-    match dest {
-      FrameAlloc::SpOffset(ofs) => {
-        if let Ok(ofs) = Imm12::try_from(*ofs) {
-          self.more_insts([Inst::Sw(*src, Reg::Sp, ofs)]);
-          return false;
-        } else {
-          let temp = *temp.expect("store_reg_to: temp register is not provided");
-          assert!(
-            temp != *src,
-            "store_reg_to: temp register should not be the same as src"
-          );
-          self.more_insts([
-            Inst::Li(temp, Imm::new(*ofs)),
-            Inst::Add(temp, Reg::Sp, temp),
-            Inst::Sw(*src, temp, Imm12::zero()),
-          ]);
-          return true;
-        }
-      }
-      FrameAlloc::Reg(reg) => {
-        if reg != src {
-          self.append_inst(Inst::Mv(*reg, *src));
-        }
-        return false;
+  pub fn dump(&self) -> Vec<String> {
+    let mut res = Vec::new();
+    for line in &self.lines {
+      match line {
+        RiscvAsmLine::Diretive(d) => res.push(format!("  {}", &d.to_string())),
+        RiscvAsmLine::Label(l) => res.push(format!("{}:", l.name)),
+        RiscvAsmLine::Inst(i) => res.push(format!("  {}", i.to_string())),
+        RiscvAsmLine::Comment(comment) => res.push(format!("  # {}", comment)),
       }
     }
+    res
   }
 }
