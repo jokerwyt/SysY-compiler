@@ -10,18 +10,20 @@ use koopa::ir::builder::{
 };
 use koopa::ir::dfg::DataFlowGraph;
 
+use koopa::ir::entities::ValueData;
 use koopa::ir::layout::InstList;
 
 use koopa::ir::{self, BasicBlock, Function, FunctionData, Program, Type, Value};
 
-use crate::ast::{
+use crate::ast_data_write_as;
+use crate::koopa_gen::ast::{
   AstData, AstNodeId, BinaryOp, ConstInitVal, FuncFParam, InitVal, InitValUnified, IsInitVal,
   UnaryOp,
 };
-use crate::ast_data_write_as;
-use crate::sym_table::{SymIdent, SymTableEntry, SymTableEntryData};
+use crate::koopa_gen::sym_table::{SymIdent, SymTableEntry, SymTableEntryData};
 
-use crate::{ast, ast::ast_nodes_read, ast::ast_nodes_write, ast_is};
+use crate::ast_is;
+use crate::koopa_gen::{ast, ast::ast_nodes_read, ast::ast_nodes_write};
 
 pub struct KoopaGen;
 
@@ -508,7 +510,10 @@ impl KoopaGen {
     }
 
     while checker.finished() == false {
-      if checker.can_append_sequence() {
+      if false && checker.can_append_sequence() {
+        // Reason that we disable this branch:
+        // It works well, but our backend does not support zero_init for store.
+
         let next_loc = checker.get_next_loc();
         let sub_shape = checker.append_sequence(false);
         let sub_alloc =
@@ -830,8 +835,8 @@ impl KoopaGen {
             let default_store_0 = ctx.new_local_value().store(zero, temp_alloc);
             ctx.insts_mut().extend([temp_alloc, default_store_0]);
 
-            let rhs_bb = ctx.new_bb_and_append("%and_rhs".to_string());
-            let sink_bb = ctx.new_bb_and_append("%and_sink".to_string());
+            let rhs_bb = ctx.new_bb_and_append(format!("%and_rhs_{}", exp.name_len5()));
+            let sink_bb = ctx.new_bb_and_append(format!("%and_sink_{}", exp.name_len5()));
 
             let branch = ctx.new_local_value().branch(lhs_v, rhs_bb, sink_bb);
             ctx.close_up(branch);
@@ -868,8 +873,8 @@ impl KoopaGen {
             let default_store_1 = ctx.new_local_value().store(one, temp_alloc);
             ctx.insts_mut().extend([temp_alloc, default_store_1]);
 
-            let rhs_bb = ctx.new_bb_and_append("%or_rhs".to_string());
-            let sink_bb = ctx.new_bb_and_append("%or_sink".to_string());
+            let rhs_bb = ctx.new_bb_and_append(format!("%or_rhs_{}", exp.name_len5()));
+            let sink_bb = ctx.new_bb_and_append(format!("%or_sink_{}", exp.name_len5()));
 
             let lhs_v = KoopaGen::gen_on_binary_exp(&lhs, ctx);
             let branch = ctx.new_local_value().branch(lhs_v, sink_bb, rhs_bb);
@@ -1185,7 +1190,6 @@ impl<'a> InitValChecker<'a> {
   }
 
   /// Return the last element that we reached, according to progress
-  #[allow(dead_code)]
   fn get_next_loc(&self) -> Vec<i32> {
     let mut last_elem = vec![];
     let mut progress = self.progress;
@@ -1421,12 +1425,13 @@ impl<'a> KoopaGenCtx<'a> {
   }
 }
 
-trait GetArrayShape {
+pub trait TypeUtils {
   fn ptr_inner(&self) -> Type;
   fn get_array_shape(&self) -> Vec<i32>;
+  fn array_inner(&self) -> Type;
 }
 
-impl GetArrayShape for Type {
+impl TypeUtils for Type {
   /// it will return vec![] for i32
   fn get_array_shape(&self) -> Vec<i32> {
     let mut shape = vec![];
@@ -1451,6 +1456,89 @@ impl GetArrayShape for Type {
     match self.kind() {
       ir::TypeKind::Pointer(inner) => inner.clone(),
       _ => panic!("Not a ptr"),
+    }
+  }
+
+  fn array_inner(&self) -> Type {
+    match self.kind() {
+      ir::TypeKind::Array(inner, _) => inner.clone(),
+      _ => panic!("Not an array"),
+    }
+  }
+}
+
+pub(crate) trait KoopaValueDataToString {
+  fn to_string(&self) -> String;
+}
+
+impl KoopaValueDataToString for ValueData {
+  fn to_string(&self) -> String {
+    match self.kind() {
+      ir::ValueKind::Integer(_)
+      | ir::ValueKind::ZeroInit(_)
+      | ir::ValueKind::Undef(_)
+      | ir::ValueKind::Aggregate(_)
+      | ir::ValueKind::FuncArgRef(_)
+      | ir::ValueKind::BlockArgRef(_) => "".to_string(),
+      ir::ValueKind::Alloc(_) => {
+        let ty = self.ty();
+        format!("alloc --> {}", ty.to_string())
+      }
+      ir::ValueKind::GlobalAlloc(_) => {
+        let ty = self.ty();
+        format!("global_alloc --> {}", ty.to_string())
+      }
+      ir::ValueKind::Load(_) => {
+        let ty = self.ty();
+        format!("load --> {}", ty.to_string())
+      }
+      ir::ValueKind::Store(_) => {
+        let ty = self.ty();
+        format!("store --> {}", ty.to_string())
+      }
+      ir::ValueKind::GetPtr(_) => {
+        let ty = self.ty();
+        format!("getptr --> {}", ty.to_string())
+      }
+      ir::ValueKind::GetElemPtr(_) => {
+        let ty = self.ty();
+        format!("getelemptr --> {}", ty.to_string())
+      }
+      ir::ValueKind::Binary(_) => {
+        let ty = self.ty();
+        format!("binary --> {}", ty.to_string())
+      }
+      ir::ValueKind::Branch(_) => {
+        let ty = self.ty();
+        format!("branch --> {}", ty.to_string())
+      }
+      ir::ValueKind::Jump(_) => {
+        let ty = self.ty();
+        format!("jump --> {}", ty.to_string())
+      }
+      ir::ValueKind::Call(_) => {
+        let ty = self.ty();
+        format!("call --> {}", ty.to_string())
+      }
+      ir::ValueKind::Return(_) => {
+        let ty = self.ty();
+        format!("ret --> {}", ty.to_string())
+      }
+    }
+  }
+}
+
+pub(crate) trait FetchValueType<'a> {
+  fn get_type(&self, prog: &'a Program, func: &'a FunctionData) -> Type;
+}
+
+impl<'a> FetchValueType<'a> for Value {
+  fn get_type(&self, prog: &'a Program, func: &'a FunctionData) -> Type {
+    if self.is_global() {
+      let value = prog.borrow_value(*self);
+      value.ty().clone()
+    } else {
+      func.dfg().value(*self).ty().clone()
     }
   }
 }

@@ -2,17 +2,17 @@ use std::io::sink;
 
 use koopa::{back::Generator, ir::Program};
 use lalrpop_util::lalrpop_mod;
-use sysy_compiler::{koopa_gen::KoopaGen, utils::interpreter::Interpreter};
+use sysy_compiler::{koopa_gen::gen::KoopaGen, utils::interpreter::Interpreter};
 lalrpop_mod!(sysy);
 
 #[test]
 fn complex_init() {
   let progs = String::from(
-    r#" 
+    r#"
 int i32 = 1;
 int t[3] = {1};
 int i32_arr[3][5] = {{}, {1, 2, 3, 4, 5}, 2};
-const int ci32 = 2; 
+const int ci32 = 2;
 const int ci32_array[5] = {ci32, ci32, ci32 + ci32 * ci32};
 int main() {
     const int c = 1;
@@ -83,7 +83,7 @@ fn complex_control_flow() {
 int main() {
     int cnt_odd = 0;
     int cnt_even = 0;
-    
+
     int i = 0;
     while (i < 100) {
         if (i % 2) {

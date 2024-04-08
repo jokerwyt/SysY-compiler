@@ -1,6 +1,5 @@
 use lalrpop_util::lalrpop_mod;
-use sysy_compiler::ast::AstNodeId;
-
+use sysy_compiler::koopa_gen::ast::*;
 lalrpop_mod!(sysy);
 
 #[test]
