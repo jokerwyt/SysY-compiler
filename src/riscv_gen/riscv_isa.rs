@@ -242,6 +242,7 @@ impl TryFrom<i32> for Imm12 {
   }
 }
 
+#[derive(Clone)]
 pub struct Label {
   pub name: String,
 }
@@ -252,6 +253,7 @@ pub enum LabelKind {
   NativeFunc,
   BasicBlock { func_name: String },
   ForeignFunc,
+  BranchTmp,
 }
 
 impl LabelKind {
@@ -271,6 +273,7 @@ impl LabelKind {
       LabelKind::ForeignFunc => {
         format!("{}", name)
       }
+      LabelKind::BranchTmp => format!("koopa_br_tmp_{}", name),
     }
   }
 }

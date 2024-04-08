@@ -38,3 +38,14 @@ macro_rules! define_wrapper {
     }
   };
 }
+
+pub fn new_tmp_idx() -> String {
+  thread_local! {
+    static COUNTER: std::cell::RefCell<usize> = std::cell::RefCell::new(0);
+  }
+  COUNTER.with(|c| {
+    let mut counter = c.borrow_mut();
+    *counter += 1;
+    format!("tmp{}", *counter)
+  })
+}

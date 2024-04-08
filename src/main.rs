@@ -12,7 +12,7 @@ lalrpop_mod!(sysy);
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct Cli {
-  #[clap(short, help = "Compile sys-y into koopa. Default into riscv")]
+  #[clap(short)]
   koopa: Option<String>,
 
   #[clap(short)]

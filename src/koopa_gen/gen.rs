@@ -5,9 +5,6 @@
 // It includes the current program, function, basic block, and other necessary information.
 // And we suppose all statements should have a sink basic block, which is placed in the ctx.
 
-use std::borrow::Borrow;
-use std::cell::Ref;
-
 use koopa::ir::builder::{
   BasicBlockBuilder, GlobalInstBuilder, LocalBuilder, LocalInstBuilder, ValueBuilder,
 };

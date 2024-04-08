@@ -3,6 +3,7 @@ use koopa::ir::{BasicBlock, Function, Program, Type, Value};
 use crate::{
   koopa_gen::gen::{FetchValueType, KoopaValueDataToString, TypeUtils},
   riscv_gen::riscv_isa::{Directive, RiscvAsmLine},
+  utils::new_tmp_idx,
 };
 
 use super::{
@@ -230,11 +231,18 @@ impl<'a> RiscvGen<'a> {
           }
           koopa::ir::ValueKind::Branch(branch) => {
             let cond_reg = self.find_rtval_and_get_reg(branch.cond(), Reg::T0);
+            let true_label = Label::new(format!("case1_{}", new_tmp_idx()), LabelKind::BranchTmp);
 
+            // Riscv Branch has range limitation.
+            // We need to make sure branch only jumps locally.
             self.riscv_prog.more_insts([
-              Inst::Bnez(cond_reg, self.bb_label(fhandle, &branch.true_bb())),
+              Inst::Bnez(cond_reg, true_label.clone()),
               Inst::J(self.bb_label(fhandle, &branch.false_bb())),
             ]);
+            self.riscv_prog.append_label(true_label);
+            self
+              .riscv_prog
+              .more_insts([Inst::J(self.bb_label(fhandle, &branch.true_bb()))])
           }
 
           koopa::ir::ValueKind::Jump(jmp) => self
