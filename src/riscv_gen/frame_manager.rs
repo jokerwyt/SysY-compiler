@@ -2,11 +2,12 @@ use std::collections::HashMap;
 
 use koopa::ir::{FunctionData, Program, Value};
 
-use crate::koopa_gen::gen::TypeUtils;
+use super::{
+  reg_allocators::{CrazySpiller, FirstComeFirstServe},
+  riscv_isa::{Reg, FUNC_ARG_REGS},
+};
 
-use super::riscv_isa::{Reg, FUNC_ARG_REGS};
-
-pub struct FrameManager<'a, Allocator>
+pub struct FrameManager<'a, Allocator = FirstComeFirstServe>
 where
   Allocator: FrameAllocator,
 {
@@ -39,14 +40,6 @@ pub enum RtValue {
   Reg(Reg),      // when value itself is stored in a register
   RegRef(Reg),   // The value is a ptr pointing to a register.
                  // It's helpful when you want to use reg scheduler for things like alloc.
-}
-
-impl RtValue {}
-
-#[derive(Clone)]
-pub enum AbstractAlloc {
-  Mem(i32),
-  Reg(Reg),
 }
 
 impl<'a, Allocator> FrameManager<'a, Allocator>
@@ -84,9 +77,9 @@ where
       if manager.active_reg.contains(&Reg::Ra) == false {
         manager.active_reg.push(Reg::Ra);
       }
-      if manager.active_reg.contains(&Reg::A0) == false {
-        manager.active_reg.push(Reg::A0);
-      }
+      // if manager.active_reg.contains(&Reg::A0) == false {
+      //   manager.active_reg.push(Reg::A0);
+      // }
     } else {
       // only save callee saved registers, since there is no function call inside.
       manager.active_reg = manager
@@ -210,73 +203,5 @@ pub trait FrameAllocator {
         _ => None,
       })
       .collect()
-  }
-}
-
-/// It spills all variables to the stack.
-pub struct CrazySpiller {
-  peak_mem: usize,
-
-  /// Note that we don't know the frame size now.
-  /// Therefore, the offset in Stack and SpOffset variant is from 0..peak_mem, instead of Sp offset.
-  /// Actually we should add outgoing_args_cnt * 4 to them.
-  mapping: HashMap<Value, RtValue>,
-}
-
-impl FrameAllocator for CrazySpiller {
-  fn new(func: &FunctionData, _available_regs: &[Reg]) -> Self {
-    let mut ret = Self {
-      peak_mem: 0,
-      mapping: HashMap::new(),
-    };
-
-    for (vhandle, vdata) in func.dfg().values() {
-      if vdata.kind().is_local_inst() == false {
-        continue;
-      }
-
-      match vdata.kind() {
-        koopa::ir::ValueKind::GlobalAlloc(_)
-        | koopa::ir::ValueKind::ZeroInit(_)
-        | koopa::ir::ValueKind::Undef(_)
-        | koopa::ir::ValueKind::Aggregate(_)
-        | koopa::ir::ValueKind::FuncArgRef(_)
-        | koopa::ir::ValueKind::Integer(_)
-        | koopa::ir::ValueKind::BlockArgRef(_) => panic!("Unexpected value kind"),
-
-        koopa::ir::ValueKind::Alloc(_) => {
-          ret
-            .mapping
-            .insert(*vhandle, RtValue::SpOffset(ret.peak_mem as i32));
-          // we will update it to the offset later.
-          ret.peak_mem += vdata.ty().ptr_inner().size();
-        }
-        koopa::ir::ValueKind::Load(_)
-        | koopa::ir::ValueKind::Store(_)
-        | koopa::ir::ValueKind::GetPtr(_)
-        | koopa::ir::ValueKind::GetElemPtr(_)
-        | koopa::ir::ValueKind::Binary(_)
-        | koopa::ir::ValueKind::Branch(_)
-        | koopa::ir::ValueKind::Jump(_)
-        | koopa::ir::ValueKind::Call(_)
-        | koopa::ir::ValueKind::Return(_) => {
-          if vdata.ty().size() > 0 {
-            ret
-              .mapping
-              .insert(*vhandle, RtValue::Stack(ret.peak_mem as i32));
-            ret.peak_mem += vdata.ty().size();
-          }
-        }
-      }
-    }
-    ret
-  }
-
-  fn memory_usage(&self) -> i32 {
-    self.peak_mem as i32
-  }
-
-  fn desicions(&self) -> &HashMap<Value, RtValue> {
-    &self.mapping
   }
 }

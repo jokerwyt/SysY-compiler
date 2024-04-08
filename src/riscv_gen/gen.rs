@@ -7,14 +7,16 @@ use crate::{
 };
 
 use super::{
-  frame_manager::{CrazySpiller, FrameManager, RtValue},
+  frame_manager::{self, RtValue},
   riscv_isa::{Imm, Imm12, Inst, Label, LabelKind, Reg, RiscvProg, FUNC_ARG_REGS},
 };
+
+type FrameManager<'a> = frame_manager::FrameManager<'a>;
 
 pub struct RiscvGen<'a> {
   riscv_prog: RiscvProg,
   koopa_prog: &'a Program,
-  fmnger: Option<FrameManager<'a, CrazySpiller>>,
+  fmnger: Option<FrameManager<'a>>,
 }
 
 impl<'a> RiscvGen<'a> {
@@ -57,12 +59,32 @@ impl<'a> RiscvGen<'a> {
       )),
     ]);
 
-    self.fmnger = Some(FrameManager::<CrazySpiller>::new(
+    self.fmnger = Some(FrameManager::new(
       self.koopa_prog,
       fdata,
       Reg::all()
         .iter()
-        .filter(|r| ![Reg::Zero, Reg::Ra, Reg::Sp, Reg::T0, Reg::T1, Reg::A0].contains(r))
+        .filter(|r| {
+          ![
+            Reg::Zero,
+            Reg::Ra,
+            Reg::Sp,
+            Reg::T0,
+            Reg::T1,
+            Reg::A0,
+            Reg::A1,
+            Reg::A2,
+            Reg::A3,
+            Reg::A4,
+            Reg::A5,
+            Reg::A6,
+            Reg::A7,
+            // TODO: If we don't ban them (A0-A7), in the very beginning of entry block,
+            // TODO: it's possible for us to use those regs
+            // TODO: before we load the args, which is buggy.
+          ]
+          .contains(r)
+        })
         .cloned()
         .collect::<Vec<_>>()
         .as_slice(),
@@ -460,7 +482,7 @@ impl<'a> RiscvGen<'a> {
     };
   }
 
-  fn fmnger(&self) -> &FrameManager<'a, CrazySpiller> {
+  fn fmnger(&self) -> &FrameManager<'a> {
     self.fmnger.as_ref().unwrap()
   }
 
@@ -607,7 +629,7 @@ impl<'a> RiscvGen<'a> {
           .more_insts([Inst::Sw(src_reg, *oncall, Imm12::zero())]);
       }
       RtValue::RegRef(reg) => {
-        self.riscv_prog.more_insts([Inst::Mv(src_reg, reg)]);
+        self.riscv_prog.more_insts([Inst::Mv(reg, src_reg)]);
       }
     }
   }
