@@ -18,6 +18,9 @@ struct Cli {
   #[clap(short)]
   riscv: Option<String>,
 
+  #[clap(short)]
+  perf: Option<String>,
+
   #[clap(short, long)]
   output: String,
   input: String,
@@ -48,6 +51,7 @@ fn main() -> Result<()> {
     // print to the output file
     std::fs::write(output, text_form_ir)?;
   } else {
+    assert!(args.riscv.is_some() || args.perf.is_some());
     // Target Riscv
 
     let riscv_gen = RiscvGen::new(&koopa_prog);
