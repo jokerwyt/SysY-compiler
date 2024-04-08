@@ -1429,6 +1429,7 @@ pub trait TypeUtils {
   fn ptr_inner(&self) -> Type;
   fn get_array_shape(&self) -> Vec<i32>;
   fn array_inner(&self) -> Type;
+  fn is_array(&self) -> bool;
 }
 
 impl TypeUtils for Type {
@@ -1463,6 +1464,13 @@ impl TypeUtils for Type {
     match self.kind() {
       ir::TypeKind::Array(inner, _) => inner.clone(),
       _ => panic!("Not an array"),
+    }
+  }
+
+  fn is_array(&self) -> bool {
+    match self.kind() {
+      ir::TypeKind::Array(_, _) => true,
+      _ => false,
     }
   }
 }

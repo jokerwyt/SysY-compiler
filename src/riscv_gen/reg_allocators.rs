@@ -157,7 +157,7 @@ impl FrameAllocator for FirstComeFirstServe {
         | koopa::ir::ValueKind::BlockArgRef(_) => panic!("Unexpected value kind"),
 
         koopa::ir::ValueKind::Alloc(_) => {
-          if vdata.ty().ptr_inner().size() == 4 && regs.is_empty() == false {
+          if vdata.ty().ptr_inner().is_array() == false && regs.is_empty() == false {
             let reg = regs.pop().unwrap();
             ret.mapping.insert(*vhandle, RtValue::RegRef(reg));
             dbg!(format!("{} assigned to {:?}", vdata.ty(), reg));
