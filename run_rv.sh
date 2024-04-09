@@ -9,4 +9,4 @@ cargo run -- -riscv $1 -o $1.S\
 && echo "ld.lld done" \
 && qemu-riscv32-static $1.elf
 
-echo $?
+echo "retval=$?"

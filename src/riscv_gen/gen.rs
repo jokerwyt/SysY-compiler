@@ -670,7 +670,7 @@ impl<'a> RiscvGen<'a> {
         RtValue::Reg(dest) => Some((src, dest)),
         RtValue::Stack(ofs) => {
           let src_reg = self.into_reg(src.clone(), tmp1);
-          self.store_reg_to(&src_reg, &RtValue::Stack(ofs), Some(&tmp1));
+          self.store_reg_to(&src_reg, &RtValue::Stack(ofs), Some(&loop_brk_tmp));
           return None; // don't collect
         }
         RtValue::Integer(_) | RtValue::SpOffset(_) | RtValue::RegRef(_) | RtValue::Label(_) => {
@@ -699,12 +699,13 @@ impl<'a> RiscvGen<'a> {
         // just make compiler happy
         let (src, dst) = (first_pair.0.clone(), first_pair.1.clone());
 
-        let src_reg = src.reg();
         assert!(
           data_src_reg.contains(&loop_brk_tmp) == false,
           "T1 is still occupied after some rounds."
         );
-        self.riscv_prog.append_inst(Inst::Mv(loop_brk_tmp, src_reg));
+        self
+          .riscv_prog
+          .append_inst(Inst::Mv(loop_brk_tmp, src.reg()));
 
         // remove src->dst, add look_brk_tmp->dst
         pending.remove(&src);

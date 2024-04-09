@@ -1,10 +1,8 @@
-use std::collections::HashMap;
-
 use koopa::ir::{FunctionData, Program, Value};
 
 use super::{
   reg_allocators::{CrazySpiller, FirstComeFirstServe, RegisterAllocator},
-  riscv_isa::{Label, Reg, FUNC_ARG_REGS},
+  riscv_isa::{Reg, FUNC_ARG_REGS},
   rtvalue::RtValue,
 };
 
