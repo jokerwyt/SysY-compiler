@@ -1,15 +1,18 @@
 #!/bin/bash
 
+# find all files whose name include space, and replace those space into "_"
+find . -name "* *" -type f | rename 's/ /_/g'
+
 list=()
 
 # # get the list of all .c file in "minic-test-cases-2021f" "minic-test-cases-2021s" 
-# list=$(find minic-test-cases-2021f minic-test-cases-2021s -name "*.c")
+list=$(find minic-test-cases-2021f minic-test-cases-2021s -name "*.c")
 
 # get the list of .sy file in "lava-test" and "TrivialCompiler"
 list="$list $(find lava-test TrivialCompiler -name "*.sy")"
 
 # sort the list
-list=$(echo $list | tr " " "\n" | sort)
+list=$(echo $list | tr " " "\n" | sort | tr "\n" " ")
 
 for file in $list
 do

@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use koopa::ir::{BasicBlock, Function, Program, Type, Value};
 
@@ -12,8 +12,8 @@ use crate::{
 };
 
 use super::{
-  frame_manager::{self, FrameManager},
-  riscv_isa::{Imm, Imm12, Inst, Label, LabelKind, Reg, RiscvProg, FUNC_ARG_REGS},
+  frame_manager::{FrameManager},
+  riscv_isa::{Imm, Imm12, Inst, Label, LabelKind, Reg, RiscvProg},
 };
 
 pub struct RiscvGen<'a> {
