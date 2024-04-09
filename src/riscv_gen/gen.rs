@@ -12,7 +12,7 @@ use crate::{
 };
 
 use super::{
-  frame_manager::{FrameManager},
+  frame_manager::FrameManager,
   riscv_isa::{Imm, Imm12, Inst, Label, LabelKind, Reg, RiscvProg},
 };
 
@@ -653,19 +653,19 @@ impl<'a> RiscvGen<'a> {
   }
 
   fn shuffle_rtval(&mut self, src_dst: Vec<(RtValue, RtValue)>, tmp1: Reg, loop_brk_tmp: Reg) {
-    // in CrazySpiller case we don't need shuffle.
-    // No value will comes from reg.
+    // // in CrazySpiller case we don't need shuffle.
+    // // No value will comes from reg.
 
-    for (src, dest) in src_dst.iter() {
-      match src {
-        RtValue::Integer(_) | RtValue::SpOffset(_) | RtValue::Stack(_) | RtValue::Label(_) => {
-          let reg = self.into_reg(src.clone(), tmp1);
-          self.store_reg_to(&reg, dest, Some(&loop_brk_tmp));
-        }
+    // for (src, dest) in src_dst.iter() {
+    //   match src {
+    //     RtValue::Integer(_) | RtValue::SpOffset(_) | RtValue::Stack(_) | RtValue::Label(_) => {
+    //       let reg = self.into_reg(src.clone(), tmp1);
+    //       self.store_reg_to(&reg, dest, Some(&loop_brk_tmp));
+    //     }
 
-        RtValue::Reg(_) | RtValue::RegRef(_) => panic!("shuffle_rtval: unexpected src RtValue"),
-      }
-    }
+    //     RtValue::Reg(_) | RtValue::RegRef(_) => panic!("shuffle_rtval: unexpected src RtValue"),
+    //   }
+    // }
 
     // return;
 
