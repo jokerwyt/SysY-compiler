@@ -312,42 +312,33 @@ impl<'a> RiscvGen<'a> {
               ))]);
             }
 
-            // save return value to T0
+            // save return value to T1
 
             let mut ret_rtval = None;
             if self.fmnger().func_data().dfg().value(*inst).ty().is_i32() {
               ret_rtval = Some(self.fmnger().local_value(inst));
-              self.store_reg_to(&Reg::A0, ret_rtval.as_ref().unwrap(), Some(&Reg::T1));
+              self.riscv_prog.append_inst(Inst::Mv(Reg::T1, Reg::A0));
             }
 
             // restore caller-saved registers
-            for reg in self
-              .fmnger()
-              .active_reg
-              .clone()
-              .iter()
-              .filter(|reg| reg.is_caller_saved())
-            {
-              if ret_rtval.is_some() {
-                if let RtValue::Reg(ret_reg) = ret_rtval.as_ref().unwrap() {
-                  if reg == ret_reg {
-                    // We don't restore this reg since it is covered by the return value.
-                    continue;
-                  }
-                }
-              }
-              let load_reg = self.into_reg(self.fmnger().reg_buffer_loc(reg), *reg);
-              assert!(load_reg == *reg);
+            for reg in self.fmnger().need_caller_saved_regs() {
+              let load_reg = self.into_reg(self.fmnger().reg_buffer_loc(&reg), reg);
+              assert!(load_reg == reg);
+            }
+
+            // move the return val to the destination
+            if let Some(ret) = ret_rtval {
+              self.store_reg_to(&Reg::T1, &ret, Some(&Reg::T0));
             }
           }
           koopa::ir::ValueKind::Return(ret) => {
-            self.riscv_prog.comment("Eplilogue".to_string());
             if let Some(ret) = ret.value() {
               let ret_reg = self.find_rtval_and_get_reg(ret, Reg::A0);
               self.store_reg_to(&ret_reg, &RtValue::Reg(Reg::A0), None);
             }
 
             // Epilogue. Restore all callee-saved registers and move Sp.
+            self.riscv_prog.comment("Eplilogue".to_string());
             for reg in self.fmnger().need_callee_saved_regs() {
               let load_reg = self.into_reg(self.fmnger().reg_buffer_loc(&reg), reg);
               assert!(load_reg == reg);

@@ -65,6 +65,8 @@ where
       if manager.active_reg.contains(&Reg::Ra) == false {
         manager.active_reg.push(Reg::Ra);
       }
+      // // short_circuit1 may WA if remove this.
+      // // TODO: Find out why.
       // if manager.active_reg.contains(&Reg::A0) == false {
       //   manager.active_reg.push(Reg::A0);
       // }
