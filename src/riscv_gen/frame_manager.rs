@@ -65,9 +65,9 @@ where
       if manager.active_reg.contains(&Reg::Ra) == false {
         manager.active_reg.push(Reg::Ra);
       }
-      // if manager.active_reg.contains(&Reg::A0) == false {
-      //   manager.active_reg.push(Reg::A0);
-      // }
+      if manager.active_reg.contains(&Reg::A0) == false {
+        manager.active_reg.push(Reg::A0);
+      }
     } else {
       // only save callee saved registers, since there is no function call inside.
       manager.active_reg = manager
