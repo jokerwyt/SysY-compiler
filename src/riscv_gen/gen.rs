@@ -288,7 +288,6 @@ impl<'a> RiscvGen<'a> {
               to_assign.insert(arg_rtval.clone(), dst_rtval.clone());
             }
 
-            self.riscv_prog.comment("shuffle arguments".to_string());
             // this is somehow tricky... Considering that A0..A7 may be allocated to some arguments,
             self.shuffle_rtval(to_assign, Reg::T0, Reg::T1);
 
@@ -662,6 +661,8 @@ impl<'a> RiscvGen<'a> {
   }
 
   fn shuffle_rtval(&mut self, src_dst: HashMap<RtValue, RtValue>, tmp1: Reg, loop_brk_tmp: Reg) {
+    self.riscv_prog.comment("shuffle arguments".to_string());
+
     // make sure all dest are regs.
     let mut src_dst: HashMap<RtValue, Reg> = src_dst
       .into_iter()
@@ -679,8 +680,6 @@ impl<'a> RiscvGen<'a> {
       .collect();
 
     while src_dst.is_empty() == false {
-      // all dest must be regs now.
-
       let data_src_reg: HashSet<Reg> = src_dst
         .keys()
         .filter_map(|key| match key {
@@ -707,10 +706,9 @@ impl<'a> RiscvGen<'a> {
         );
         self.riscv_prog.append_inst(Inst::Mv(loop_brk_tmp, src_reg));
 
-        // remove src->dst, add T1->dst
+        // remove src->dst, add look_brk_tmp->dst
         pending.remove(&src);
         pending.insert(RtValue::Reg(loop_brk_tmp), dst);
-        self.store_reg_to(&src_reg, &RtValue::Reg(dst), Some(&tmp1));
       } else {
         // fire all can_fire and go to next round.
         for (src, dst) in can_fire {
