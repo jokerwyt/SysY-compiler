@@ -55,7 +55,7 @@ impl<'a> RiscvGen<'a> {
   fn gen_on_func(&mut self, fhandle: &Function, fdata: &'a koopa::ir::FunctionData) {
     self.riscv_prog.extend([
       RiscvAsmLine::Diretive(Directive::Text),
-      RiscvAsmLine::Diretive(Directive::Globl(fdata.name()[1..].to_string())),
+      RiscvAsmLine::Diretive(Directive::Globl(fdata.name().to_string())),
       RiscvAsmLine::Label(Label::new(
         fdata.name()[1..].to_string(),
         LabelKind::NativeFunc,
@@ -82,9 +82,6 @@ impl<'a> RiscvGen<'a> {
             // Reg::A5,
             // Reg::A6,
             // Reg::A7,
-            // // TODO: If we don't ban them (A0-A7), in the very beginning of entry block,
-            // // TODO: it's possible for us to use those regs
-            // // TODO: before we load the args, which is buggy.
           ]
           .contains(r)
         })
@@ -385,33 +382,30 @@ impl<'a> RiscvGen<'a> {
     match value.kind() {
       koopa::ir::ValueKind::GlobalAlloc(alloc) => {
         let init_data = self.koopa_prog.borrow_value(alloc.init());
-        let words = self.globl_value_to_words(init_data);
-        for i in words {
-          self.riscv_prog.append_directive(Directive::Word(i));
-        }
+        let words = self.globl_value_to_directives(init_data);
+        self.riscv_prog.more_directive(words);
       }
       _ => panic!("gen_global_alloc: unexpected value kind"),
     }
   }
 
-  fn globl_value_to_words(
+  fn globl_value_to_directives(
     &self,
     value: std::cell::Ref<'a, koopa::ir::entities::ValueData>,
-  ) -> Vec<i32> {
+  ) -> Vec<Directive> {
     match value.kind() {
-      koopa::ir::ValueKind::Integer(v) => vec![v.value()],
+      koopa::ir::ValueKind::Integer(v) => vec![Directive::Word(v.value())],
       koopa::ir::ValueKind::ZeroInit(_) => {
         let ty = value.ty();
         let size = ty.size();
-        assert!(size % 4 == 0, "size must be multiple of 4");
-        vec![0; size / 4]
+        vec![Directive::Zero(size)]
       }
       koopa::ir::ValueKind::Undef(_) => unimplemented!(),
       koopa::ir::ValueKind::Aggregate(agg) => {
         let mut words = Vec::new();
         for elem in agg.elems() {
           let elem_data = self.koopa_prog.borrow_value(elem.clone());
-          let elem_words = self.globl_value_to_words(elem_data);
+          let elem_words = self.globl_value_to_directives(elem_data);
           words.extend(elem_words);
         }
         words
