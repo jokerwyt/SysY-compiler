@@ -118,8 +118,8 @@ impl AstNodeId {
     res.take()
   }
 
-  pub fn name_len5(&self) -> String {
-    self.0.to_string().chars().take(5).collect()
+  pub fn name_len8(&self) -> String {
+    self.0.to_string().chars().take(8).collect()
   }
 
   pub fn is_array(&self) -> bool {

@@ -6,6 +6,6 @@ cargo run -- -riscv $1 -o $1.S\
 && echo "clang done" \
 && ld.lld $1.o -L$CDE_LIBRARY_PATH/riscv32 -lsysy -o $1.elf \
 && echo "ld.lld done" \
-&& qemu-riscv32-static $1.elf < debug/std.in
+&& qemu-riscv32-static $1.elf
 
 echo "retval=$?"
