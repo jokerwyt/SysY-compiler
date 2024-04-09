@@ -1,7 +1,7 @@
 use koopa::ir::{FunctionData, Program, Value};
 
 use super::{
-  reg_allocators::{CrazySpiller, FirstComeFirstServe, RegisterAllocator},
+  reg_allocators::{CrazySpiller, RegisterAllocator},
   riscv_isa::{Reg, FUNC_ARG_REGS},
   rtvalue::RtValue,
 };
@@ -64,8 +64,8 @@ where
     }
     // // short_circuit1 may WA if remove this.
     // // TODO: Find out why.
-    // if manager.active_reg.contains(&Reg::A0) == false {
-    //   manager.active_reg.push(Reg::A0);
+    // if manager.reg_occupied.contains(&Reg::A0) == false {
+    //   manager.reg_occupied.push(Reg::A0);
     // }
 
     // Saved Registers part.
