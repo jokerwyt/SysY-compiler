@@ -8,7 +8,7 @@ use super::{
   rtvalue::RtValue,
 };
 
-pub struct FrameManager<'a, Allocator = FirstComeFirstServe>
+pub struct FrameManager<'a, Allocator = CrazySpiller>
 where
   Allocator: RegisterAllocator,
 {
