@@ -40,7 +40,8 @@ impl<'a> RiscvGen<'a> {
       self.gen_global_alloc(prog.borrow_value(global_alloc.clone()));
     }
 
-    for (fhandle, fdata) in prog.funcs() {
+    for fhandle in prog.func_layout() {
+      let fdata = prog.func(*fhandle);
       // skip external functions that do not have an entry block.
       if fdata.layout().bbs().is_empty() {
         continue;
@@ -74,6 +75,7 @@ impl<'a> RiscvGen<'a> {
             Reg::Sp,
             Reg::T0,
             Reg::T1,
+            Reg::Tp,
             // Reg::A0,
             // Reg::A1,
             // Reg::A2,
@@ -279,38 +281,37 @@ impl<'a> RiscvGen<'a> {
             }
 
             // src, dest
-            let mut to_assign = HashMap::new();
-
-            // prepare arguments
-            for (idx, arg) in call.args().iter().enumerate() {
-              let arg_rtval = self.rt_val(arg);
-              let dst_rtval = self.fmnger().next_args_rtval(idx);
-              to_assign.insert(arg_rtval.clone(), dst_rtval.clone());
-            }
+            let to_assign = call
+              .args()
+              .iter()
+              .enumerate()
+              .map(|(idx, arg)| {
+                let arg_rtval = self.rt_val(arg);
+                let dst_rtval = self.fmnger().next_args_rtval(idx);
+                (arg_rtval, dst_rtval)
+              })
+              .collect();
 
             // this is somehow tricky... Considering that A0..A7 may be allocated to some arguments,
             self.shuffle_rtval(to_assign, Reg::T0, Reg::T1);
 
             // call
 
-            if self
-              .koopa_prog
-              .func(call.callee())
-              .layout()
-              .bbs()
-              .is_empty()
-            {
-              // foreign function.
-              self.riscv_prog.more_insts([Inst::Call(Label::new(
-                self.koopa_prog.func(call.callee()).name()[1..].to_string(),
-                LabelKind::ForeignFunc,
-              ))]);
-            } else {
-              self.riscv_prog.more_insts([Inst::Call(Label::new(
-                self.koopa_prog.func(call.callee()).name()[1..].to_string(),
-                LabelKind::NativeFunc,
-              ))]);
-            }
+            // foreign function.
+            self.riscv_prog.more_insts([Inst::Call(Label::new(
+              self.koopa_prog.func(call.callee()).name()[1..].to_string(),
+              if self
+                .koopa_prog
+                .func(call.callee())
+                .layout()
+                .bbs()
+                .is_empty()
+              {
+                LabelKind::ForeignFunc
+              } else {
+                LabelKind::NativeFunc
+              },
+            ))]);
 
             // save return value to T1
 
@@ -450,7 +451,7 @@ impl<'a> RiscvGen<'a> {
     self.store_reg_to(&ptr_reg, &target, Some(&tmp2_reg));
   }
 
-  fn rt_val(&mut self, val: &Value) -> RtValue {
+  fn rt_val(&self, val: &Value) -> RtValue {
     if val.is_global() {
       // It must be a global alloc.
       let vdata = self.koopa_prog.borrow_value(*val);
@@ -647,8 +648,8 @@ impl<'a> RiscvGen<'a> {
   /// Side effect:
   /// oncall may be occupied.
   fn find_rtval_and_get_reg(&mut self, ptr: Value, oncall: Reg) -> Reg {
-    let ptr_loc = self.rt_val(&ptr);
-    self.into_reg(ptr_loc, oncall)
+    let loc = self.rt_val(&ptr);
+    self.into_reg(loc, oncall)
   }
 
   fn shuffle_rtval(&mut self, src_dst: HashMap<RtValue, RtValue>, tmp1: Reg, loop_brk_tmp: Reg) {
