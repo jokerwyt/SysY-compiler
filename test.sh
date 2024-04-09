@@ -17,16 +17,23 @@ list="$list $(find lava-test TrivialCompiler -name "*.sy")"
 
 # sort the list
 list=$(echo $list | tr " " "\n" | sort | tr "\n" " ")
+
+cargo build
+
 fail_list=()
+
+# catch control-c, output the failed test cases, and exit
+trap 'echo "Failed test cases:"; for file in ${fail_list[@]}; do echo $file; done; exit' INT
 
 for file in $list
 do
     echo "Testing $file"
     rm -f $file.S $file.o $file.elf $file.elf.sysy.out $file.clang.out $file.clang.elf
 
-    cargo run -- -riscv $file -o $file.S > /dev/null 2>&1
+    ./target/debug/sysy-compiler -riscv $file -o $file.S > /dev/null 2>&1 # MODIFY ME IF NEEDED
     # make sure it return 0
     if [ $? -ne 0 ]; then
+        echo -e "\e[31mOoops\e[0m"
         echo "Error in cargo run"
         fail_list+=($file)
         continue
@@ -34,6 +41,7 @@ do
     clang $file.S -c -o $file.o -target riscv32-unknown-linux-elf -march=rv32im -mabi=ilp32 
     # make sure it return 0
     if [ $? -ne 0 ]; then
+        echo -e "\e[31mOoops\e[0m"
         echo "Error in clang"
         fail_list+=($file)
         continue
@@ -41,6 +49,7 @@ do
     ld.lld $file.o -L$CDE_LIBRARY_PATH/riscv32 -lsysy -o $file.elf
     # make sure it return 0
     if [ $? -ne 0 ]; then
+        echo -e "\e[31mOoops\e[0m"
         echo "Error in ld.lld"
         fail_list+=($file)
         continue
@@ -50,6 +59,7 @@ do
     clang -x c $file -L$CDE_LIBRARY_PATH/native -lsysy -o $file.clang.elf > /dev/null 2>&1
     # make sure it return 0
     if [ $? -ne 0 ]; then
+        echo -e "\e[31mOoops\e[0m"
         echo "Error in clang directly"
         fail_list+=($file)
         continue
@@ -61,16 +71,17 @@ do
         input_file=/dev/null
     fi
 
-    qemu-riscv32-static $file.elf < $input_file > $file.elf.sysy.out
+    timeout 1m qemu-riscv32-static $file.elf < $input_file > $file.elf.sysy.out
     sysy_retval=$?
 
-    ./$file.clang.elf < $input_file > $file.clang.out
+    timeout 1m ./$file.clang.elf < $input_file > $file.clang.out
     gcc_retval=$?
 
     # It cannot identify both segmentation fault.
     # But it does not matter...
 
     if [ $sysy_retval -ne $gcc_retval ]; then
+        echo -e "\e[31mOoops\e[0m"
         echo "Error: return value not match"
         fail_list+=($file)
         continue
@@ -79,6 +90,7 @@ do
     # compare the output
     diff $file.elf.sysy.out $file.clang.out
     if [ $? -ne 0 ]; then
+        echo -e "\e[31mOoops\e[0m"
         echo "Error: output not match"
         fail_list+=($file)
         continue
@@ -93,3 +105,4 @@ for file in ${fail_list[@]}
 do
     echo $file
 done
+

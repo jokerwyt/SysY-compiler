@@ -68,25 +68,7 @@ impl<'a> RiscvGen<'a> {
       fdata,
       Reg::all()
         .iter()
-        .filter(|r| {
-          ![
-            Reg::Zero,
-            Reg::Ra,
-            Reg::Sp,
-            Reg::T0,
-            Reg::T1,
-            Reg::Tp,
-            // Reg::A0,
-            // Reg::A1,
-            // Reg::A2,
-            // Reg::A3,
-            // Reg::A4,
-            // Reg::A5,
-            // Reg::A6,
-            // Reg::A7,
-          ]
-          .contains(r)
-        })
+        .filter(|r| ![Reg::Zero, Reg::Ra, Reg::Sp, Reg::T0, Reg::T1].contains(r))
         .cloned()
         .collect::<Vec<_>>()
         .as_slice(),
@@ -297,7 +279,6 @@ impl<'a> RiscvGen<'a> {
 
             // call
 
-            // foreign function.
             self.riscv_prog.more_insts([Inst::Call(Label::new(
               self.koopa_prog.func(call.callee()).name()[1..].to_string(),
               if self
@@ -424,31 +405,27 @@ impl<'a> RiscvGen<'a> {
   }
 
   /// Advance the pointer by `inner_size * idx` and store the result to `target`.
+  /// use T0 and T1.
   fn advance_ptr(&mut self, ptr: &Value, size_unit: i32, idx: RtValue, target: RtValue) {
     let idx_reg = self.into_reg(idx, Reg::T1);
-    // idx_reg maybe T1, or T0, or something else.
-
-    let tmp_reg = if idx_reg != Reg::T0 { Reg::T0 } else { Reg::T1 };
+    assert!(idx_reg != Reg::T0);
 
     // ptr += inner_size * idx
     self.riscv_prog.more_insts([
-      Inst::Li(tmp_reg, Imm::new(size_unit)),
-      Inst::Mul(idx_reg, idx_reg, tmp_reg),
+      Inst::Li(Reg::T0, Imm::new(size_unit)),
+      Inst::Mul(idx_reg, idx_reg, Reg::T0),
     ]);
     // Now idx_reg = inner_size * idx
 
-    let ptr_reg = self.find_rtval_and_get_reg(*ptr, tmp_reg);
+    let ptr_reg = self.find_rtval_and_get_reg(*ptr, Reg::T0);
     assert!(ptr_reg != idx_reg);
 
     self
       .riscv_prog
-      .append_inst(Inst::Add(ptr_reg, ptr_reg, idx_reg));
-    // Now ptr_reg = ptr + inner_size * idx
-
-    // ptr_reg maybe T0, or T1, or something else.
-    // Secure tmp2_reg != ptr_reg in all cases.
-    let tmp2_reg = if ptr_reg != Reg::T0 { Reg::T0 } else { Reg::T1 };
-    self.store_reg_to(&ptr_reg, &target, Some(&tmp2_reg));
+      .append_inst(Inst::Add(Reg::T0, ptr_reg, idx_reg));
+    // Now T0 = ptr + inner_size * idx
+    // we don't need ptr_reg and idx_reg anymore.
+    self.store_reg_to(&Reg::T0, &target, Some(&Reg::T1));
   }
 
   fn rt_val(&self, val: &Value) -> RtValue {
