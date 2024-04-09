@@ -3,13 +3,14 @@ use std::collections::HashMap;
 use koopa::ir::{FunctionData, Program, Value};
 
 use super::{
-  reg_allocators::{CrazySpiller, FirstComeFirstServe},
-  riscv_isa::{Reg, FUNC_ARG_REGS},
+  reg_allocators::{CrazySpiller, FirstComeFirstServe, RegisterAllocator},
+  riscv_isa::{Label, Reg, FUNC_ARG_REGS},
+  rtvalue::RtValue,
 };
 
 pub struct FrameManager<'a, Allocator = FirstComeFirstServe>
 where
-  Allocator: FrameAllocator,
+  Allocator: RegisterAllocator,
 {
   #[allow(dead_code)]
   prog: &'a Program,
@@ -31,20 +32,9 @@ where
   pub active_reg: Vec<Reg>,
 }
 
-/// This struct is used to describe the value or the storage location of it in runtime.
-#[derive(Clone, Copy, Debug)]
-pub enum RtValue {
-  Integer(i32),  // Integer
-  SpOffset(i32), // the value is Sp+offset.
-  Stack(i32),    // the value is 4B. Its address is Sp+offset.
-  Reg(Reg),      // when value itself is stored in a register
-  RegRef(Reg),   // The value is a ptr pointing to a register.
-                 // It's helpful when you want to use reg scheduler for things like alloc.
-}
-
 impl<'a, Allocator> FrameManager<'a, Allocator>
 where
-  Allocator: FrameAllocator,
+  Allocator: RegisterAllocator,
 {
   pub fn new(prog: &'a Program, func: &'a FunctionData, available_regs: &[Reg]) -> Self {
     let mut manager = Self {
@@ -124,10 +114,11 @@ where
 
       koopa::ir::ValueKind::Integer(v) => return RtValue::Integer(v.value()),
       koopa::ir::ValueKind::FuncArgRef(arg) => {
-        if arg.index() >= 8 {
-          return RtValue::Stack((arg.index() - 8) as i32 * 4 + self.frame_len);
+        if arg.index() >= FUNC_ARG_REGS.len() {
+          return RtValue::Stack((arg.index() - FUNC_ARG_REGS.len()) as i32 * 4 + self.frame_len);
         } else {
-          return self.func_call_arg_rtval(arg.index());
+          /* The allocator will also assign this reg to it */
+          return RtValue::Reg(FUNC_ARG_REGS[arg.index()]);
         }
       }
       koopa::ir::ValueKind::BlockArgRef(_) => unimplemented!("BlockArgRef"),
@@ -138,7 +129,7 @@ where
     assert!(vdata.kind().is_local_inst());
     let loc = self.allocator.decision(val);
     match loc {
-      RtValue::Integer(_) | RtValue::Reg(_) | RtValue::RegRef(_) => return loc,
+      RtValue::Integer(_) | RtValue::Reg(_) | RtValue::RegRef(_) | RtValue::Label(_) => return loc,
       RtValue::SpOffset(ofs_from_0) => {
         return RtValue::SpOffset(ofs_from_0 + self.outgoing_args_cnt * 4);
       }
@@ -150,7 +141,7 @@ where
   }
 
   /// Outgoing arg rtval for next call.
-  pub(crate) fn func_call_arg_rtval(&self, idx: usize) -> RtValue {
+  pub(crate) fn next_args_rtval(&self, idx: usize) -> RtValue {
     if idx >= FUNC_ARG_REGS.len() {
       RtValue::Stack((idx - FUNC_ARG_REGS.len()) as i32 * 4)
     } else {
@@ -173,35 +164,6 @@ where
       .clone()
       .into_iter()
       .filter(|reg| reg.is_callee_saved())
-      .collect()
-  }
-}
-
-pub trait FrameAllocator {
-  fn new(func: &FunctionData, available_regs: &[Reg]) -> Self;
-
-  /// Return the number of stack needed for local variables.
-  /// Note that: Frame size = Saved Registers + Local Variables + Outgoing Arguments
-  /// Here we only consider Local Variables part.
-  fn memory_usage(&self) -> i32;
-
-  /// We assume there is an interval on stack for us to use.
-  /// And the offset we give out is from 0..mem_usage().
-  fn desicions(&self) -> &HashMap<Value, RtValue>;
-
-  fn decision(&self, value: &Value) -> RtValue {
-    self.desicions().get(value).unwrap().clone()
-  }
-
-  fn reg_used(&self) -> Vec<Reg> {
-    self
-      .desicions()
-      .values()
-      .filter_map(|alloc| match alloc {
-        RtValue::Reg(reg) => Some(reg.clone()),
-        RtValue::RegRef(reg) => Some(reg.clone()),
-        _ => None,
-      })
       .collect()
   }
 }

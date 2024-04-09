@@ -242,7 +242,7 @@ impl TryFrom<i32> for Imm12 {
   }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug, Hash, Eq, PartialEq)]
 pub struct Label {
   pub name: String,
 }
