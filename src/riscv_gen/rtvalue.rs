@@ -11,6 +11,7 @@ pub enum RtValue {
   // It's helpful when you want to use reg scheduler for things like alloc.
   Label(Label), // It's a 32-bit const address.
 }
+
 impl RtValue {
   pub(crate) fn reg(&self) -> Reg {
     match self {

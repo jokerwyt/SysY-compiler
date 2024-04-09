@@ -281,7 +281,7 @@ impl<'a> RiscvGen<'a> {
             }
 
             // src, dest
-            let to_assign = call
+            let to_assign: Vec<(RtValue, RtValue)> = call
               .args()
               .iter()
               .enumerate()
@@ -652,7 +652,7 @@ impl<'a> RiscvGen<'a> {
     self.into_reg(loc, oncall)
   }
 
-  fn shuffle_rtval(&mut self, src_dst: HashMap<RtValue, RtValue>, tmp1: Reg, loop_brk_tmp: Reg) {
+  fn shuffle_rtval(&mut self, src_dst: Vec<(RtValue, RtValue)>, tmp1: Reg, loop_brk_tmp: Reg) {
     // in CrazySpiller case we don't need shuffle.
     // No value will comes from reg.
 
@@ -667,12 +667,12 @@ impl<'a> RiscvGen<'a> {
       }
     }
 
-    return;
+    // return;
 
     self.riscv_prog.comment("shuffle arguments".to_string());
 
     // make sure all dest are regs.
-    let mut src_dst: HashMap<RtValue, Reg> = src_dst
+    let mut src_dst: Vec<(RtValue, Reg)> = src_dst
       .into_iter()
       .filter_map(|(src, dest)| match dest {
         RtValue::Reg(dest) => Some((src, dest)),
@@ -689,8 +689,8 @@ impl<'a> RiscvGen<'a> {
 
     while src_dst.is_empty() == false {
       let data_src_reg: HashSet<Reg> = src_dst
-        .keys()
-        .filter_map(|key| match key {
+        .iter()
+        .filter_map(|(src, _dst)| match src {
           RtValue::Reg(reg) => Some(*reg),
           _ => None,
         })
@@ -698,7 +698,7 @@ impl<'a> RiscvGen<'a> {
 
       let (mut pending, can_fire) = src_dst
         .into_iter()
-        .partition::<HashMap<RtValue, Reg>, _>(|(_src, dst)| data_src_reg.contains(dst));
+        .partition::<Vec<(RtValue, Reg)>, _>(|(_src, dst)| data_src_reg.contains(dst));
 
       if can_fire.len() == 0 {
         // need to manually break the loop.
@@ -716,8 +716,8 @@ impl<'a> RiscvGen<'a> {
           .append_inst(Inst::Mv(loop_brk_tmp, src.reg()));
 
         // remove src->dst, add look_brk_tmp->dst
-        pending.remove(&src);
-        pending.insert(RtValue::Reg(loop_brk_tmp), dst);
+        pending.retain(|(_src, see_dst)| dst != *see_dst);
+        pending.push((RtValue::Reg(loop_brk_tmp), dst));
       } else {
         // fire all can_fire and go to next round.
         for (src, dst) in can_fire {
