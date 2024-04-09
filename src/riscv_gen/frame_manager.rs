@@ -25,9 +25,9 @@ where
 
   allocator: Allocator,
 
-  /// Registers that need to be saved.
-  /// We don't care about other registers, since they are not active;
-  pub active_reg: Vec<Reg>,
+  /// Registers that may be modified in this function (i.e. from the start label to ret)
+  /// do not include T0 and T1.
+  reg_occupied: Vec<Reg>,
 }
 
 impl<'a, Allocator> FrameManager<'a, Allocator>
@@ -40,49 +40,36 @@ where
       func,
       frame_len: 0,
       allocator: Allocator::new(func, available_regs),
-      active_reg: vec![],
+      reg_occupied: vec![],
       outgoing_args_cnt: 0,
     };
 
     // Outgoing Arguments part.
-    let mut is_leave_func = true;
     let mut longest_args = 0;
     for (_vhandle, vdata) in func.dfg().values() {
       if let koopa::ir::ValueKind::Call(call) = vdata.kind() {
         let params = call.args().len();
         longest_args = longest_args.max(params);
-        is_leave_func = false;
       }
     }
 
     manager.outgoing_args_cnt = ((longest_args as i32) - 8).max(0);
 
-    if is_leave_func == false {
-      // there is function call inside.
-      manager.active_reg = manager.allocator.reg_used();
+    // there is function call inside.
+    manager.reg_occupied = manager.allocator.reg_used();
 
-      // Ra and A0 are implicitly used in non-leave func.
-      if manager.active_reg.contains(&Reg::Ra) == false {
-        manager.active_reg.push(Reg::Ra);
-      }
-      // // short_circuit1 may WA if remove this.
-      // // TODO: Find out why.
-      // if manager.active_reg.contains(&Reg::A0) == false {
-      //   manager.active_reg.push(Reg::A0);
-      // }
-    } else {
-      // only save callee saved registers, since there is no function call inside.
-      manager.active_reg = manager
-        .allocator
-        .reg_used()
-        .iter()
-        .filter(|reg| reg.is_callee_saved())
-        .cloned()
-        .collect();
+    // Ra are implicitly used by return.
+    if manager.reg_occupied.contains(&Reg::Ra) == false {
+      manager.reg_occupied.push(Reg::Ra);
     }
+    // // short_circuit1 may WA if remove this.
+    // // TODO: Find out why.
+    // if manager.active_reg.contains(&Reg::A0) == false {
+    //   manager.active_reg.push(Reg::A0);
+    // }
 
     // Saved Registers part.
-    manager.frame_len = 4 * (manager.active_reg.len() as i32)
+    manager.frame_len = 4 * (manager.reg_occupied.len() as i32)
       + manager.allocator.memory_usage()
       + 4 * manager.outgoing_args_cnt;
 
@@ -94,7 +81,7 @@ where
 
   /// Return the offset to Sp of saved register in the frame.
   pub fn reg_buffer_loc(&self, reg: &Reg) -> RtValue {
-    let idx = self.active_reg.iter().position(|r| r == reg).unwrap();
+    let idx = self.reg_occupied.iter().position(|r| r == reg).unwrap();
     RtValue::Stack(4 * (idx as i32) + self.allocator.memory_usage() + 4 * self.outgoing_args_cnt)
   }
 
@@ -117,16 +104,17 @@ where
         if arg.index() >= FUNC_ARG_REGS.len() {
           return RtValue::Stack((arg.index() - FUNC_ARG_REGS.len()) as i32 * 4 + self.frame_len);
         } else {
-          /* The allocator will also assign this reg to it */
-          return RtValue::Reg(FUNC_ARG_REGS[arg.index()]);
+          /* The allocator will assign the correct reg to it */
         }
       }
       koopa::ir::ValueKind::BlockArgRef(_) => unimplemented!("BlockArgRef"),
       koopa::ir::ValueKind::GlobalAlloc(_) => panic!("Unexpected value kind"),
       _ => {}
     }
-    // part2. handle local instructions.
-    assert!(vdata.kind().is_local_inst());
+    // part2. handle local instructions or func arg refs.
+    assert!(
+      vdata.kind().is_local_inst() || matches!(vdata.kind(), koopa::ir::ValueKind::FuncArgRef(_))
+    );
     let loc = self.allocator.decision(val);
     match loc {
       RtValue::Integer(_) | RtValue::Reg(_) | RtValue::RegRef(_) | RtValue::Label(_) => return loc,
@@ -151,7 +139,7 @@ where
 
   pub(crate) fn need_caller_saved_regs(&self) -> Vec<Reg> {
     self
-      .active_reg
+      .reg_occupied
       .clone()
       .into_iter()
       .filter(|reg| reg.is_caller_saved())
@@ -160,7 +148,7 @@ where
 
   pub(crate) fn need_callee_saved_regs(&self) -> Vec<Reg> {
     self
-      .active_reg
+      .reg_occupied
       .clone()
       .into_iter()
       .filter(|reg| reg.is_callee_saved())

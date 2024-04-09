@@ -61,7 +61,7 @@ impl RegisterAllocator for CrazySpiller {
     };
 
     for (vhandle, vdata) in func.dfg().values() {
-      if vdata.kind().is_local_inst() == false {
+      if vdata.kind().is_const() {
         continue;
       }
 
