@@ -31,27 +31,6 @@ impl RegisterAllocator for Greedy {
 
     let liveness = Liveness::new(func);
 
-    // interval considering values and their users
-    let interval: HashMap<Value, (usize, usize)> = liveness
-      .values()
-      .filter_map(|val| {
-        let mut occur: Vec<(usize, usize)> = func
-          .dfg()
-          .value(*val)
-          .used_by()
-          .iter()
-          .map(|value| liveness.interval(*value))
-          .collect();
-
-        occur.push(liveness.interval(*val));
-
-        // get first dimension min and second dimension max
-        let (min, _) = occur.iter().min_by_key(|(a, _)| *a).unwrap();
-        let (_, max) = occur.iter().max_by_key(|(_, b)| *b).unwrap();
-        Some((*val, (*min, *max)))
-      })
-      .collect();
-
     // bind all FuncArgRef first
     for (vhandle, vdata) in func.dfg().values() {
       match vdata.kind() {
@@ -72,7 +51,7 @@ impl RegisterAllocator for Greedy {
     let mut weight: Vec<(Value, f32)> = liveness
       .values()
       .map(|v| {
-        let (min, max) = interval.get(v).unwrap();
+        let (min, max) = liveness.interval(*v);
         let len = max - min + 1;
         let used_by = func.dfg().value(*v).used_by().len() as f32;
         (*v, used_by / (len as f32))
@@ -103,12 +82,12 @@ impl RegisterAllocator for Greedy {
         continue;
       }
 
-      let (l, r) = interval.get(&val).unwrap();
+      let (l, r) = liveness.interval(val);
       let occupied_regs: Vec<Reg> = ret
         .binding
         .iter()
         .filter_map(|(value, rtval)| {
-          let (ll, rr) = interval.get(value).unwrap();
+          let (ll, rr) = liveness.interval(*value);
 
           // if [l, r] and [ll, rr] has intersection
           if l <= rr && r >= ll {
@@ -218,21 +197,7 @@ impl<'a> Liveness<'a> {
     self.get_value_idx(&last_inst)
   }
 
-  /// return the interval of this value
-  pub fn interval(&self, val: Value) -> (usize, usize) {
-    // TODO: optimize for value within one block
-
-    let bb = self.func_data.layout().parent_bb(val);
-    if bb == None {
-      // this value is a FuncArgRef
-      assert!(matches!(
-        self.func_data.dfg().value(val).kind(),
-        koopa::ir::ValueKind::FuncArgRef(_)
-      ));
-      return (0, self.get_value_idx(&val));
-    }
-    let bb = bb.unwrap();
-
+  pub fn reaching(&self, bb: BasicBlock) -> (usize, usize) {
     let earliest = self.earliest_succ_bb(bb);
     let latest = self.latest_pred_bb(bb);
 
@@ -240,6 +205,33 @@ impl<'a> Liveness<'a> {
     let r = self.last_inst_idx(self.block(latest));
 
     (l, r)
+  }
+
+  /// We find out the interval of each occurance of the value, and combine them.
+  pub fn interval(&self, val: Value) -> (usize, usize) {
+    let occur: Vec<(usize, usize)> = self
+      .func_data
+      .dfg()
+      .value(val)
+      .used_by()
+      .iter()
+      .map(|value| {
+        let bb = self.func_data.layout().parent_bb(*value).unwrap();
+        return self.reaching(bb);
+      })
+      .collect();
+
+    // we only need the min of definition and the max of use.
+    let bb = self.func_data.layout().parent_bb(val);
+    let min = if let Some(bb) = bb {
+      self.reaching(bb).0
+    } else {
+      // if this value is a FuncArgRef, the interval should start from the first block.
+      0
+    };
+    let (_, max) = occur.iter().max_by_key(|(_, b)| *b).unwrap_or(&(0, 0));
+    // If it's never used, we don't need to allocate it, hence (0, 0) is enough.
+    (min, min.max(*max))
   }
 
   pub fn new(fdata: &'a FunctionData) -> Self {
@@ -256,6 +248,16 @@ impl<'a> Liveness<'a> {
     for (_bhandle, _bnode) in fdata.layout().bbs() {
       for (inst, _) in _bnode.insts() {
         idx.insert(*inst, idx.len());
+      }
+    }
+
+    // verify use after def
+    for vhandle in idx.keys() {
+      let vdata = fdata.dfg().value(*vhandle);
+      for user in vdata.used_by() {
+        let def_loc = idx.get(vhandle).unwrap();
+        let user_loc = idx.get(user).unwrap();
+        assert!(def_loc < user_loc);
       }
     }
 
