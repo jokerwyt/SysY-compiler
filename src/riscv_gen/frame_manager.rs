@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use koopa::ir::{FunctionData, Program, Value};
 
 #[allow(unused)]
@@ -32,7 +34,7 @@ where
 
   /// Registers that may be modified in this function (i.e. from the start label to ret)
   /// do not include T0 and T1.
-  reg_occupied: Vec<Reg>,
+  reg_occupied: HashSet<Reg>,
 }
 
 impl<'a, Allocator> FrameManager<'a, Allocator>
@@ -45,7 +47,7 @@ where
       func,
       frame_len: 0,
       allocator: Allocator::new(func, available_regs),
-      reg_occupied: vec![],
+      reg_occupied: HashSet::new(),
       outgoing_args_cnt: 0,
     };
 
@@ -64,9 +66,7 @@ where
     manager.reg_occupied = manager.allocator.reg_used();
 
     // Ra are implicitly used by return.
-    if manager.reg_occupied.contains(&Reg::Ra) == false {
-      manager.reg_occupied.push(Reg::Ra);
-    }
+    manager.reg_occupied.insert(Reg::Ra);
 
     // Saved Registers part.
     manager.frame_len = 4 * (manager.reg_occupied.len() as i32)
@@ -137,7 +137,7 @@ where
     }
   }
 
-  pub(crate) fn need_caller_saved_regs(&self) -> Vec<Reg> {
+  pub(crate) fn need_caller_saved_regs(&self) -> HashSet<Reg> {
     self
       .reg_occupied
       .clone()
@@ -146,7 +146,7 @@ where
       .collect()
   }
 
-  pub(crate) fn need_callee_saved_regs(&self) -> Vec<Reg> {
+  pub(crate) fn need_callee_saved_regs(&self) -> HashSet<Reg> {
     self
       .reg_occupied
       .clone()

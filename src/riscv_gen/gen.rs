@@ -13,16 +13,17 @@ use crate::{
 
 use super::{
   frame_manager::FrameManager,
+  reg_allocators::RegisterAllocator,
   riscv_isa::{Imm, Imm12, Inst, Label, LabelKind, Reg, RiscvProg},
 };
 
-pub struct RiscvGen<'a> {
+pub struct RiscvGen<'a, Allocator: RegisterAllocator> {
   riscv_prog: RiscvProg,
   koopa_prog: &'a Program,
-  fmnger: Option<FrameManager<'a>>,
+  fmnger: Option<FrameManager<'a, Allocator>>,
 }
 
-impl<'a> RiscvGen<'a> {
+impl<'a, Allocator: RegisterAllocator> RiscvGen<'a, Allocator> {
   pub fn new(prog: &'a Program) -> Self {
     Type::set_ptr_size(4);
 
@@ -450,7 +451,7 @@ impl<'a> RiscvGen<'a> {
     };
   }
 
-  fn fmnger(&self) -> &FrameManager<'a> {
+  fn fmnger(&self) -> &FrameManager<'a, Allocator> {
     self.fmnger.as_ref().unwrap()
   }
 

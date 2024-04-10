@@ -6,6 +6,8 @@ use std::io::Result;
 use sysy_compiler::koopa_gen::ast::AstNodeId;
 use sysy_compiler::koopa_gen::gen::KoopaGen;
 use sysy_compiler::riscv_gen::gen::RiscvGen;
+use sysy_compiler::riscv_gen::reg_allocators::first_come_first_serve::FirstComeFirstServe;
+use sysy_compiler::riscv_gen::reg_allocators::greedy::Greedy;
 
 lalrpop_mod!(sysy);
 
@@ -62,10 +64,13 @@ fn main() -> Result<()> {
     assert!(args.riscv.is_some() || args.perf.is_some());
     // Target Riscv
 
-    let riscv_gen = RiscvGen::new(&koopa_prog);
-
-    // print to the output file
-    std::fs::write(output, riscv_gen.gen().dump().join("\n"))?;
+    if args.perf.is_some() {
+      let riscv_gen = RiscvGen::<Greedy>::new(&koopa_prog);
+      std::fs::write(output, riscv_gen.gen().dump().join("\n"))?;
+    } else {
+      let riscv_gen = RiscvGen::<FirstComeFirstServe>::new(&koopa_prog);
+      std::fs::write(output, riscv_gen.gen().dump().join("\n"))?;
+    }
   }
   Ok(())
 }

@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use koopa::ir::{FunctionData, Value};
 
@@ -29,7 +29,7 @@ pub trait RegisterAllocator {
     self.desicions().get(value).unwrap().clone()
   }
 
-  fn reg_used(&self) -> Vec<Reg> {
+  fn reg_used(&self) -> HashSet<Reg> {
     self
       .desicions()
       .values()

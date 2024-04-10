@@ -253,32 +253,16 @@ impl<'a> Liveness<'a> {
           return self.reaching(bb);
         } else {
           panic!();
-          // assert!(matches!(
-          //   self.func_data.dfg().value(*value).kind(),
-          //   koopa::ir::ValueKind::FuncArgRef(_)
-          // ));
-          // // We can assume that FuncArgRef is defined at the very begining of entry block.
-          // (0, 0)
         }
       })
       .collect();
 
-    // we only need the min of definition and the max of use.
-    let bb = self.func_data.layout().parent_bb(val);
-    let min = if let Some(bb) = bb {
-      self.reaching(bb).0
-    } else {
-      // if this value is a FuncArgRef, the interval should start from the first block.
-      0
-    };
-
     // If it's never used, we don't need to allocate it, hence (0, 0) is enough.
-    let (_, max) = *occur
-      .iter()
-      .max_by_key(|(_, b)| *b)
-      .unwrap_or(&(0, usize::MIN));
-
-    (min, min.max(max)) // secure cases there is no user, hence max = 0.
+    let (min, max) = occur.iter().fold(
+      (self.get_value_idx(&val), self.get_value_idx(&val)),
+      |(min, max), (l, r)| (min.min(*l), max.max(*r)),
+    );
+    (min, max) // secure cases there is no user, hence max = 0.
   }
 
   pub fn new(fdata: &'a FunctionData) -> Self {
