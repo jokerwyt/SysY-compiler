@@ -1,15 +1,17 @@
 use koopa::ir::{FunctionData, Program, Value};
 
+#[allow(unused)]
+use super::reg_allocators::{
+  crazy_spiller::CrazySpiller, first_come_first_serve::FirstComeFirstServe, greedy::Greedy,
+  RegisterAllocator,
+};
+
 use super::{
-  reg_allocators::{
-    crazy_spiller::CrazySpiller, first_come_first_serve::FirstComeFirstServe, greedy::Greedy,
-    RegisterAllocator,
-  },
   riscv_isa::{Reg, FUNC_ARG_REGS},
   rtvalue::RtValue,
 };
 
-pub struct FrameManager<'a, Allocator = CrazySpiller>
+pub struct FrameManager<'a, Allocator = Greedy>
 where
   Allocator: RegisterAllocator,
 {

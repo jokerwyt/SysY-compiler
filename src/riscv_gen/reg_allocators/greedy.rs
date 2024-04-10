@@ -1,4 +1,4 @@
-use std::collections::{hash_map::Keys, HashMap};
+use std::collections::{hash_map::Keys, HashMap, HashSet};
 
 use koopa::ir::{entities::ValueData, BasicBlock, FunctionData, Value};
 
@@ -197,6 +197,7 @@ impl<'a> Liveness<'a> {
     self.get_value_idx(&last_inst)
   }
 
+  /// (Earliest succ, Latest pred)
   pub fn reaching(&self, bb: BasicBlock) -> (usize, usize) {
     let earliest = self.earliest_succ_bb(bb);
     let latest = self.latest_pred_bb(bb);
@@ -209,15 +210,56 @@ impl<'a> Liveness<'a> {
 
   /// We find out the interval of each occurance of the value, and combine them.
   pub fn interval(&self, val: Value) -> (usize, usize) {
-    let occur: Vec<(usize, usize)> = self
-      .func_data
-      .dfg()
-      .value(val)
-      .used_by()
+    let used_by = self.func_data.dfg().value(val).used_by();
+
+    // FuncArgRef special case.
+    if matches!(
+      self.func_data.dfg().value(val).kind(),
+      koopa::ir::ValueKind::FuncArgRef(_)
+    ) {
+      assert!(used_by.len() == 1);
+
+      return (0, self.get_value_idx(used_by.iter().next().unwrap()));
+    }
+
+    // intra-block assignment:
+
+    let blocks: HashSet<_> = used_by
+      .iter()
+      .chain(std::iter::once(&val))
+      .map(|value| self.func_data.layout().parent_bb(*value).unwrap())
+      .collect();
+
+    if blocks.len() == 1 {
+      let intervals: Vec<_> = used_by
+        .iter()
+        .chain(std::iter::once(&val))
+        .map(|value| self.get_value_idx(value))
+        .collect();
+
+      return (
+        *intervals.iter().min().unwrap(),
+        *intervals.iter().max().unwrap(),
+      );
+    }
+
+    // inter-block assignment:
+
+    let occur: Vec<(usize, usize)> = used_by
       .iter()
       .map(|value| {
-        let bb = self.func_data.layout().parent_bb(*value).unwrap();
-        return self.reaching(bb);
+        let bb = self.func_data.layout().parent_bb(*value);
+        if let Some(bb) = bb {
+          return self.reaching(bb);
+        } else {
+          panic!();
+          // assert!(matches!(
+          //   self.func_data.dfg().value(*value).kind(),
+          //   koopa::ir::ValueKind::FuncArgRef(_)
+          // ));
+          // // We can assume that FuncArgRef is defined at the very begining of entry block.
+          // (0, 0)
+        }
       })
       .collect();
 
@@ -229,9 +271,14 @@ impl<'a> Liveness<'a> {
       // if this value is a FuncArgRef, the interval should start from the first block.
       0
     };
-    let (_, max) = occur.iter().max_by_key(|(_, b)| *b).unwrap_or(&(0, 0));
+
     // If it's never used, we don't need to allocate it, hence (0, 0) is enough.
-    (min, min.max(*max))
+    let (_, max) = *occur
+      .iter()
+      .max_by_key(|(_, b)| *b)
+      .unwrap_or(&(0, usize::MIN));
+
+    (min, min.max(max)) // secure cases there is no user, hence max = 0.
   }
 
   pub fn new(fdata: &'a FunctionData) -> Self {
@@ -287,45 +334,65 @@ impl<'a> Liveness<'a> {
       .map(|(bb, _)| *bb)
       .collect::<Vec<BasicBlock>>();
 
-    while changed.is_empty() == false {
-      let mut next_changed = Vec::new();
-      for bb in changed {
-        let mut earliest = *ret.earliest.get(&bb).unwrap();
-        let mut latest = *ret.latest.get(&bb).unwrap();
-
+    let pred: HashMap<BasicBlock, Vec<BasicBlock>> = fdata
+      .layout()
+      .bbs()
+      .iter()
+      .map(|(bb, _)| {
         let pred = fdata
           .dfg()
-          .bb(bb)
+          .bb(*bb)
           .used_by()
           .iter()
           .map(|val| fdata.layout().parent_bb(*val).unwrap())
           .collect::<Vec<BasicBlock>>();
+        (*bb, pred)
+      })
+      .collect();
 
+    let succ = fdata
+      .layout()
+      .bbs()
+      .iter()
+      .map(|(bb, _)| {
         let last_inst = fdata
           .layout()
           .bbs()
-          .node(&bb)
+          .node(bb)
           .unwrap()
           .insts()
           .back_key()
           .unwrap();
         let succ = fdata.dfg().value(*last_inst).succs();
+        (*bb, succ)
+      })
+      .collect::<HashMap<BasicBlock, Vec<BasicBlock>>>();
 
-        for pred in pred {
-          latest = latest.max(*ret.latest.get(&pred).unwrap());
-        }
-        for succ in succ {
-          earliest = earliest.min(*ret.earliest.get(&succ).unwrap());
+    while changed.is_empty() == false {
+      let mut next_changed = HashSet::new();
+      for bb in changed {
+        let earliest = *ret.earliest.get(&bb).unwrap();
+        let latest = *ret.latest.get(&bb).unwrap();
+
+        // update bb's succ and pred
+        for succ in succ.get(&bb).unwrap() {
+          let succ_idx = ret.earliest.get_mut(succ).unwrap();
+          if *succ_idx > earliest {
+            *succ_idx = earliest;
+            next_changed.insert(*succ);
+          }
         }
 
-        if earliest != *ret.earliest.get(&bb).unwrap() || latest != *ret.latest.get(&bb).unwrap() {
-          next_changed.push(bb);
-          ret.earliest.insert(bb, earliest);
-          ret.latest.insert(bb, latest);
+        for pred in pred.get(&bb).unwrap() {
+          let pred_idx = ret.latest.get_mut(pred).unwrap();
+          if *pred_idx < latest {
+            *pred_idx = latest;
+            next_changed.insert(*pred);
+          }
         }
       }
 
-      changed = next_changed;
+      changed = next_changed.into_iter().collect();
     }
 
     ret
@@ -351,6 +418,7 @@ impl<'a> Liveness<'a> {
     *self.v_idx.get(value).unwrap()
   }
 
+  #[allow(unused)]
   fn block_idx(&self, bb: BasicBlock) -> usize {
     *self.b_idx.get(&bb).unwrap()
   }
