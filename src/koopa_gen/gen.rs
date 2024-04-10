@@ -558,10 +558,12 @@ impl KoopaGen {
         // Eval on the current block
         let cond = KoopaGen::gen_on_exp(&expr, ctx);
         let true_bb = ctx.new_bb_and_append(format!("%br_1_{}", branch1.name_len8()));
-        let sink_bb = ctx.new_bb_and_append(format!("%if_sink_{}", stmt.name_len8()));
+        let sink_bb;
 
         if let Some(branch0) = branch0 {
           let false_bb = ctx.new_bb_and_append(format!("%br_0_{}", branch0.name_len8()));
+          sink_bb = ctx.new_bb_and_append(format!("%if_sink_{}", stmt.name_len8()));
+
           let branch = ctx.new_local_value().branch(cond, true_bb, false_bb);
           ctx.close_up(branch);
 
@@ -573,6 +575,8 @@ impl KoopaGen {
             ctx.close_up(jump);
           }
         } else {
+          sink_bb = ctx.new_bb_and_append(format!("%if_sink_{}", stmt.name_len8()));
+
           let branch = ctx.new_local_value().branch(cond, true_bb, sink_bb);
           ctx.close_up(branch);
         }

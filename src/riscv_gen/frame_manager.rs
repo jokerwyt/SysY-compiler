@@ -1,12 +1,14 @@
 use koopa::ir::{FunctionData, Program, Value};
 
 use super::{
-  reg_allocators::{first_come_first_serve::FirstComeFirstServe, RegisterAllocator},
+  reg_allocators::{
+    first_come_first_serve::FirstComeFirstServe, greedy::Greedy, RegisterAllocator,
+  },
   riscv_isa::{Reg, FUNC_ARG_REGS},
   rtvalue::RtValue,
 };
 
-pub struct FrameManager<'a, Allocator = FirstComeFirstServe>
+pub struct FrameManager<'a, Allocator = Greedy>
 where
   Allocator: RegisterAllocator,
 {

@@ -6,6 +6,7 @@ use super::{riscv_isa::Reg, rtvalue::RtValue};
 
 pub mod crazy_spiller;
 pub mod first_come_first_serve;
+pub mod greedy;
 
 pub trait RegisterAllocator {
   fn new(func: &FunctionData, available_regs: &[Reg]) -> Self;
@@ -24,6 +25,7 @@ pub trait RegisterAllocator {
   fn desicions(&self) -> &HashMap<Value, RtValue>;
 
   fn decision(&self, value: &Value) -> RtValue {
+    dbg!(self.desicions().get(value).unwrap().clone());
     self.desicions().get(value).unwrap().clone()
   }
 
