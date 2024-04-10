@@ -1,6 +1,5 @@
 #/bin/bash
 
-find debug/ ! -name '*.c' -type f -delete
 
 cargo run -- -riscv $1 -o $1.S\
 && clang $1.S -c -o $1.o -target riscv32-unknown-linux-elf -march=rv32im -mabi=ilp32 \
@@ -9,4 +8,4 @@ cargo run -- -riscv $1 -o $1.S\
 && echo "ld.lld done" \
 && qemu-riscv32-static $1.elf
 
-echo $?
+echo "retval=$?"

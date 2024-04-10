@@ -3,3 +3,8 @@ Cargo.lock
 .vscode/
 debug/
 out.txt
+minic-test-cases-2021f/
+minic-test-cases-2021s/
+TrivialCompiler/
+lava-test/
+data/

@@ -557,11 +557,13 @@ impl KoopaGen {
       } => {
         // Eval on the current block
         let cond = KoopaGen::gen_on_exp(&expr, ctx);
-        let true_bb = ctx.new_bb_and_append(format!("%br_1_{}", branch1.name_len5()));
-        let sink_bb = ctx.new_bb_and_append(format!("%if_sink_{}", stmt.name_len5()));
+        let true_bb = ctx.new_bb_and_append(format!("%br_1_{}", branch1.name_len8()));
+        let sink_bb;
 
         if let Some(branch0) = branch0 {
-          let false_bb = ctx.new_bb_and_append(format!("%br_0_{}", branch0.name_len5()));
+          let false_bb = ctx.new_bb_and_append(format!("%br_0_{}", branch0.name_len8()));
+          sink_bb = ctx.new_bb_and_append(format!("%if_sink_{}", stmt.name_len8()));
+
           let branch = ctx.new_local_value().branch(cond, true_bb, false_bb);
           ctx.close_up(branch);
 
@@ -573,6 +575,8 @@ impl KoopaGen {
             ctx.close_up(jump);
           }
         } else {
+          sink_bb = ctx.new_bb_and_append(format!("%if_sink_{}", stmt.name_len8()));
+
           let branch = ctx.new_local_value().branch(cond, true_bb, sink_bb);
           ctx.close_up(branch);
         }
@@ -592,9 +596,9 @@ impl KoopaGen {
         cond_bb: _,
         end_bb: _,
       } => {
-        let cond_bb = ctx.new_bb_and_append(format!("%while_cond_{}", stmt.name_len5()));
-        let body_bb = ctx.new_bb_and_append(format!("%while_body_{}", stmt.name_len5()));
-        let end_bb = ctx.new_bb_and_append(format!("%while_sink_{}", stmt.name_len5()));
+        let cond_bb = ctx.new_bb_and_append(format!("%while_cond_{}", stmt.name_len8()));
+        let body_bb = ctx.new_bb_and_append(format!("%while_body_{}", stmt.name_len8()));
+        let end_bb = ctx.new_bb_and_append(format!("%while_sink_{}", stmt.name_len8()));
 
         // update AST stored data, for future break and continue.
         ast_data_write_as!(stmt, Stmt, |stmt| {
@@ -831,12 +835,12 @@ impl KoopaGen {
             let temp_alloc = ctx.new_local_value().alloc(Type::get_i32());
             ctx
               .dfg_mut()
-              .set_value_name(temp_alloc, Some(format!("%and_temp_{}", exp.name_len5())));
+              .set_value_name(temp_alloc, Some(format!("%and_temp_{}", exp.name_len8())));
             let default_store_0 = ctx.new_local_value().store(zero, temp_alloc);
             ctx.insts_mut().extend([temp_alloc, default_store_0]);
 
-            let rhs_bb = ctx.new_bb_and_append(format!("%and_rhs_{}", exp.name_len5()));
-            let sink_bb = ctx.new_bb_and_append(format!("%and_sink_{}", exp.name_len5()));
+            let rhs_bb = ctx.new_bb_and_append(format!("%and_rhs_{}", exp.name_len8()));
+            let sink_bb = ctx.new_bb_and_append(format!("%and_sink_{}", exp.name_len8()));
 
             let branch = ctx.new_local_value().branch(lhs_v, rhs_bb, sink_bb);
             ctx.close_up(branch);
@@ -869,12 +873,12 @@ impl KoopaGen {
             let temp_alloc = ctx.new_local_value().alloc(Type::get_i32());
             ctx
               .dfg_mut()
-              .set_value_name(temp_alloc, Some(format!("%or_temp_{}", exp.name_len5())));
+              .set_value_name(temp_alloc, Some(format!("%or_temp_{}", exp.name_len8())));
             let default_store_1 = ctx.new_local_value().store(one, temp_alloc);
             ctx.insts_mut().extend([temp_alloc, default_store_1]);
 
-            let rhs_bb = ctx.new_bb_and_append(format!("%or_rhs_{}", exp.name_len5()));
-            let sink_bb = ctx.new_bb_and_append(format!("%or_sink_{}", exp.name_len5()));
+            let rhs_bb = ctx.new_bb_and_append(format!("%or_rhs_{}", exp.name_len8()));
+            let sink_bb = ctx.new_bb_and_append(format!("%or_sink_{}", exp.name_len8()));
 
             let lhs_v = KoopaGen::gen_on_binary_exp(&lhs, ctx);
             let branch = ctx.new_local_value().branch(lhs_v, sink_bb, rhs_bb);
@@ -1429,6 +1433,7 @@ pub trait TypeUtils {
   fn ptr_inner(&self) -> Type;
   fn get_array_shape(&self) -> Vec<i32>;
   fn array_inner(&self) -> Type;
+  fn is_array(&self) -> bool;
 }
 
 impl TypeUtils for Type {
@@ -1463,6 +1468,13 @@ impl TypeUtils for Type {
     match self.kind() {
       ir::TypeKind::Array(inner, _) => inner.clone(),
       _ => panic!("Not an array"),
+    }
+  }
+
+  fn is_array(&self) -> bool {
+    match self.kind() {
+      ir::TypeKind::Array(_, _) => true,
+      _ => false,
     }
   }
 }

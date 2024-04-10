@@ -204,7 +204,7 @@ impl Directive {
     match self {
       Directive::Text => ".text".to_string(),
       Directive::Data => ".data".to_string(),
-      Directive::Globl(s) => format!(".globl {}", s),
+      Directive::Globl(s) => format!(".globl {}", s[1..].to_string()),
       Directive::Zero(n) => format!(".zero {}", n),
       Directive::Word(n) => format!(".word {}", n),
     }
@@ -242,7 +242,7 @@ impl TryFrom<i32> for Imm12 {
   }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug, Hash, Eq, PartialEq)]
 pub struct Label {
   pub name: String,
 }
@@ -259,7 +259,7 @@ pub enum LabelKind {
 impl LabelKind {
   fn label_name(&self, name: String) -> String {
     match self {
-      LabelKind::GlobalVar => format!("koopa_glb_var_{}", name),
+      LabelKind::GlobalVar => format!("koopa_glb_var_{}", name[1..].to_string()),
       LabelKind::NativeFunc => {
         if name == "main" {
           return "main".to_string();
@@ -507,5 +507,11 @@ impl RiscvProg {
       }
     }
     res
+  }
+
+  pub(crate) fn more_directive(&mut self, words: Vec<Directive>) {
+    for word in words {
+      self.lines.push(RiscvAsmLine::Diretive(word));
+    }
   }
 }
